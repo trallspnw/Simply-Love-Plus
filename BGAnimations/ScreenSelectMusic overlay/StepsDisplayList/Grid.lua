@@ -4,10 +4,24 @@ if GAMESTATE:IsCourseMode() then return end
 -- ----------------------------------------------
 
 local GetStepsToDisplay = LoadActor("./StepsToDisplay.lua")
+local meter_height = 28
+local meter_spacing = 2
+local name_width = 78
+local meter_width = 30
+local column_gap = 2
+local total_width = name_width + meter_width + column_gap
+
+local name_box_x = -((meter_width + column_gap) / 2)
+local meter_box_x = ((name_width + column_gap) / 2)
+
+local DifficultyLabel = function(difficulty)
+	if not difficulty then return "" end
+	return THEME:GetString("Difficulty", ToEnumShortString(difficulty))
+end
 
 local t = Def.ActorFrame{
 	Name="StepsDisplayList",
-	InitCommand=function(self) self:xy(_screen.cx-26, _screen.cy + 67) end,
+	InitCommand=function(self) self:xy(_screen.cx-34, _screen.cy + 67) end,
 
 	OnCommand=function(self)                           self:queuecommand("RedrawStepsDisplay") end,
 	CurrentSongChangedMessageCommand=function(self)    self:queuecommand("RedrawStepsDisplay") end,
@@ -30,9 +44,11 @@ local t = Def.ActorFrame{
 						-- and BlockRow coloring appropriately
 						local meter = StepsToDisplay[i]:GetMeter()
 						local difficulty = StepsToDisplay[i]:GetDifficulty()
+						self:GetChild("Grid"):GetChild("Name_"..i):playcommand("Set",   {Meter=meter, Difficulty=difficulty})
 						self:GetChild("Grid"):GetChild("Meter_"..i):playcommand("Set",  {Meter=meter, Difficulty=difficulty})
 					else
 						-- otherwise, set the meter to an empty string and hide this particular colored BlockRow
+						self:GetChild("Grid"):GetChild("Name_"..i):playcommand("Unset")
 						self:GetChild("Grid"):GetChild("Meter_"..i):playcommand("Unset")
 					end
 				end
@@ -46,7 +62,7 @@ local t = Def.ActorFrame{
 t[#t+1] = Def.Quad{
 	Name="Background",
 	InitCommand=function(self)
-		self:diffuse(color("#1e282f")):zoomto(32,152)
+		self:diffuse(color("#1e282f")):zoomto(total_width + 4, 152)
 		if ThemePrefs.Get("RainbowMode") then
 			self:diffusealpha(0.9)
 		end
@@ -63,11 +79,25 @@ local Grid = Def.ActorFrame{
 
 for RowNumber=-2, 2 do
 	Grid[#Grid+1] = Def.Quad{
+		Name="NameBackground_"..(RowNumber + 3),
+		InitCommand=function(self)
+			self:diffuse(color("#0f0f0f"))
+				:zoomto(name_width, meter_height)
+				:x(name_box_x)
+				:y((meter_height + meter_spacing) * RowNumber)
+			if ThemePrefs.Get("RainbowMode") then
+				self:diffusealpha(0.9)
+			end
+		end
+	}
+
+	Grid[#Grid+1] = Def.Quad{
 		Name="MeterBackground_"..(RowNumber + 3),
 		InitCommand=function(self)
-			local height = 28
-			local spacing = 2
-			self:diffuse(color("#0f0f0f")):zoomto(height, height):y((height+spacing)*RowNumber)
+			self:diffuse(color("#0f0f0f"))
+				:zoomto(meter_width, meter_height)
+				:x(meter_box_x)
+				:y((meter_height + meter_spacing) * RowNumber)
 			if ThemePrefs.Get("RainbowMode") then
 				self:diffusealpha(0.9)
 			end
@@ -75,16 +105,26 @@ for RowNumber=-2, 2 do
 	}
 
 	Grid[#Grid+1] = LoadFont("Common Bold")..{
+		Name="Name_"..(RowNumber + 3),
+		InitCommand=function(self)
+			self:x(name_box_x):y((meter_height + meter_spacing) * RowNumber):zoom(0.4):maxwidth(180)
+		end,
+		SetCommand=function(self, params)
+			self:diffuse( DifficultyColor(params.Difficulty) )
+			self:settext(DifficultyLabel(params.Difficulty))
+		end,
+		UnsetCommand=function(self) self:settext(""):diffuse(color("#182025")) end,
+	}
+
+	Grid[#Grid+1] = LoadFont("Common Bold")..{
 		Name="Meter_"..(RowNumber + 3),
 		InitCommand=function(self)
-			local height = 28
-			local spacing = 2
-			self:y((height+spacing)*RowNumber):zoom(0.45)
+			self:x(meter_box_x):y((meter_height + meter_spacing) * RowNumber):zoom(0.45)
 		end,
 		SetCommand=function(self, params)
 			-- diffuse and set each chart's difficulty meter
 			self:diffuse( DifficultyColor(params.Difficulty) )
-			self:settext(params.Meter)
+			self:settext(tostring(params.Meter or "?"))
 		end,
 		UnsetCommand=function(self) self:settext(""):diffuse(color("#182025")) end,
 	}

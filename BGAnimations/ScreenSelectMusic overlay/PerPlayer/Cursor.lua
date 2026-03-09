@@ -10,6 +10,7 @@ local p = PlayerNumber:Reverse()[player]
 local GetStepsToDisplay = LoadActor("../StepsDisplayList/StepsToDisplay.lua")
 -- I feel like this surely must be the wrong way to do this...
 local GlobalOffsetSeconds = PREFSMAN:GetPreference("GlobalOffsetSeconds")
+local cursor_x_offset = 70
 
 local RowIndex = 1
 
@@ -41,11 +42,11 @@ return Def.Sprite{
 		self:bounce():effectclock("beatnooffset")
 
 		if player == PLAYER_1 then
-			self:x( IsUsingWideScreen() and _screen.cx-53 or 267)
+			self:x( IsUsingWideScreen() and _screen.cx-79 or 241)
 			self:effectmagnitude(-3,0,0)
 		elseif player == PLAYER_2 then
 			self:rotationz(180)
-			self:x(IsUsingWideScreen() and _screen.cx-17 or 303)
+			self:x(IsUsingWideScreen() and _screen.cx+9 or 329)
 			self:effectmagnitude(3,0,0)
 		end
 
@@ -89,6 +90,8 @@ return Def.Sprite{
 		local sdl = self:GetParent():GetParent():GetChild("StepsDisplayList")
 		if sdl then
 			local grid = sdl:GetChild("Grid")
+			local direction = (player == PLAYER_1) and -1 or 1
+			self:x(sdl:GetX() + (cursor_x_offset * direction))
 			self:y(sdl:GetY() + grid:GetY() + grid:GetChild("Meter_"..RowIndex):GetY() + 1 )
 		end
 	end

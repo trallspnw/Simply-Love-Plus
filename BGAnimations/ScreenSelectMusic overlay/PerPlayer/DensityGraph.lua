@@ -16,7 +16,7 @@ local showPatternInfo = false
 local af = Def.ActorFrame{
 	InitCommand=function(self)
 		self:visible( GAMESTATE:IsHumanPlayer(player) )
-		self:xy(_screen.cx-182, _screen.cy+23)
+		self:xy(_screen.cx-232, _screen.cy+23)
 
 		if player == PLAYER_2 then
 			self:addy(height+24)

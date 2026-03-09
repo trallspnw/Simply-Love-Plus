@@ -12,13 +12,7 @@ Tracks fork-specific features and improvements added beyond upstream Simply Love
 ## Entries
 
 ### 2026-03-09
-- Feature: Select Music difficulty label + meter
-- Area: `BGAnimations/ScreenSelectMusic overlay/StepsDisplayList/Grid.lua`, `BGAnimations/ScreenSelectMusic overlay/PerPlayer/Cursor.lua`
-- Summary: Difficulty grid now renders localized difficulty name followed by numeric meter (example: `Hard 12`) and widens the row blocks to fit text.
-- Notes: Cursor anchor positions were adjusted to align with the wider grid.
-
-### 2026-03-09
-- Feature: Select Music split name/meter columns
-- Area: `BGAnimations/ScreenSelectMusic overlay/StepsDisplayList/Grid.lua`, `BGAnimations/ScreenSelectMusic overlay/PerPlayer/Cursor.lua`
-- Summary: Difficulty grid now uses separate aligned boxes per row: difficulty name on the left and meter value on the right.
-- Notes: Shifted the whole grid slightly left and made cursor X positioning follow the grid position dynamically.
+- Feature: Song selection difficulty name + meter layout
+- Area: `BGAnimations/ScreenSelectMusic overlay/StepsDisplayList/Grid.lua`, `BGAnimations/ScreenSelectMusic overlay/PerPlayer/Cursor.lua`, `BGAnimations/ScreenSelectMusic overlay/PerPlayer/DensityGraph.lua`
+- Summary: Extended song-select difficulty display to include localized difficulty names alongside meters, using aligned name/meter boxes.
+- Notes: Included layout/cursor/chart-info positioning adjustments so the new labels fit cleanly without overlapping nearby elements, and shifted the `STEPS` header strip left to better align with chart info.
