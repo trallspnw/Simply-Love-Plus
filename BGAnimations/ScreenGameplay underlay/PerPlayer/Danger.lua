@@ -15,6 +15,7 @@ if failtype == "FailType_Off" then return end
 local pn = ToEnumShortString(player)
 
 local style = GAMESTATE:GetCurrentStyle()
+if not style then return end
 local styleType = style:GetStyleType()
 local IsPlayingDouble = (styleType == 'StyleType_OnePlayerTwoSides' or styleType == 'StyleType_TwoPlayersSharedSides')
 

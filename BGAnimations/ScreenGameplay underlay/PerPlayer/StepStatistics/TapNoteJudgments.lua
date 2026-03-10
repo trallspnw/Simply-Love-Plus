@@ -34,7 +34,7 @@ if ShowFaPlusWindow then
 	TNS.Judgments["W0"] = 0
 end
 
-local tns_string = "TapNoteScore" .. (SL.Global.GameMode=="ITG" and "" or SL.Global.GameMode)
+local tns_string = "TapNoteScore" .. ((SL.Global.GameMode=="ITG" or SL.Global.GameMode=="Queue") and "" or SL.Global.GameMode)
 
 -- get TNS names appropriate for the current GameMode, localized to the current language
 for i, judgment in ipairs(TNS.Types) do

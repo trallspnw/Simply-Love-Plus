@@ -145,6 +145,7 @@ local GlobalDefaults = {
 			}
 			self.TimeAtSessionStart = nil
 			self.SampleMusicLoops = ThemePrefs.Get("SampleMusicLoops")
+			self.QueueModeActive = false
 
 			self.GameplayReloadCheck = false
 			-- How long to wait before displaying a "cue"
@@ -478,6 +479,11 @@ SL = {
 	--    ErrorMessage: string, the reasoning for the failure.
 	Downloads = {}
 }
+
+-- Queue mode is a custom flow mode and currently reuses ITG judgment/scoring prefs.
+SL.Preferences.Queue = SL.Preferences.ITG
+SL.Metrics.Queue = SL.Metrics.ITG
+SL.JudgmentColors.Queue = SL.JudgmentColors.ITG
 
 
 -- Initialize preferences by calling this method.  We typically do
