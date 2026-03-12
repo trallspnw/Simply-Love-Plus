@@ -4,9 +4,13 @@ local top_screen
 local target_song
 local available_steps = {}
 local selected_index = 1
+local queue_state = "loading"
 local queue_timeout_seconds = 10
 local queue_request_started_at = -1
-local queue_request_id = 0
+local queue_error_started_at = -1
+local queue_error_grace_seconds = 15
+local queue_poll_interval_seconds = 5
+local queue_next_poll_at = -1
 local queued_song_path = ""
 local queued_difficulty_name = ""
 local queued_player_name = ""
@@ -117,9 +121,11 @@ local get_player_name = function(player_data)
 end
 
 local set_queue_error = function(title, detail)
+	queue_state = "error"
 	queue_error_title = title or ""
 	queue_error_detail = detail or ""
 	is_loading = false
+	queue_next_poll_at = -1
 end
 
 local clear_queue_error = function()
@@ -127,8 +133,27 @@ local clear_queue_error = function()
 	queue_error_detail = ""
 end
 
+local set_queue_loading = function()
+	queue_state = "loading"
+	is_loading = true
+	clear_queue_error()
+end
+
+local set_queue_empty = function()
+	queue_state = "empty"
+	is_loading = false
+	clear_queue_error()
+end
+
+local set_queue_ready = function()
+	queue_state = "ready"
+	is_loading = false
+	clear_queue_error()
+	queue_next_poll_at = -1
+end
+
 local queue_has_loaded_song = function()
-	return (not is_loading) and queue_error_title == ""
+	return queue_state == "ready"
 end
 
 local get_response_error_detail = function(response, body)
@@ -156,7 +181,39 @@ local get_response_error_detail = function(response, body)
 	return THEME:GetString("ScreenQueueReady", "RequestFailed")
 end
 
-local request_queue_song = function(frame)
+local schedule_queue_poll = function()
+	queue_next_poll_at = GetTimeSinceStart() + queue_poll_interval_seconds
+end
+
+local handle_queue_request_failure = function(frame, detail)
+	local now = GetTimeSinceStart()
+
+	if queue_error_started_at < 0 then
+		queue_error_started_at = now
+	end
+
+	if (now - queue_error_started_at) >= queue_error_grace_seconds then
+		set_queue_error(
+			THEME:GetString("ScreenQueueReady", "ConnectionError"),
+			detail
+		)
+		frame:playcommand("Refresh")
+		return
+	end
+
+	schedule_queue_poll()
+
+	if queue_state == "empty" then
+		-- Stay on the empty-queue message while polling in the background.
+	else
+		queue_state = "loading"
+		is_loading = true
+	end
+
+	frame:playcommand("Refresh")
+end
+
+local request_queue_song = function(frame, show_loading)
 	if not frame then return end
 
 	local config = (SL.Global and SL.Global.StepManiaServer) or {}
@@ -169,10 +226,13 @@ local request_queue_song = function(frame)
 	queued_song_path = ""
 	queued_difficulty_name = ""
 	queued_player_name = ""
-	is_loading = true
-	clear_queue_error()
+
+	if show_loading then
+		set_queue_loading()
+	end
+
 	queue_request_started_at = GetTimeSinceStart()
-	queue_request_id = queue_request_id + 1
+	queue_next_poll_at = -1
 
 	if queue_request then
 		queue_request:Cancel()
@@ -189,9 +249,6 @@ local request_queue_song = function(frame)
 	end
 
 	frame:playcommand("Refresh")
-	frame:queuecommand("QueueRequestLoop")
-
-	local current_request_id = queue_request_id
 
 	queue_request = NETWORK:HttpRequest{
 		url=base_url .. QUEUE_ENDPOINT,
@@ -202,36 +259,23 @@ local request_queue_song = function(frame)
 		connectTimeout=queue_timeout_seconds,
 		transferTimeout=queue_timeout_seconds,
 		onResponse=function(response)
-			if current_request_id ~= queue_request_id then
-				return
-			end
-
 			queue_request = nil
 			local body = JsonDecode(response and response.body or "")
 
 			if not response or response.statusCode ~= 200 then
-				set_queue_error(
-					THEME:GetString("ScreenQueueReady", "ConnectionError"),
-					get_response_error_detail(response, body)
-				)
-				frame:playcommand("Refresh")
+				handle_queue_request_failure(frame, get_response_error_detail(response, body))
 				return
 			end
 
 			if type(body) ~= "table" then
-				set_queue_error(
-					THEME:GetString("ScreenQueueReady", "ConnectionError"),
-					THEME:GetString("ScreenQueueReady", "InvalidResponse")
-				)
-				frame:playcommand("Refresh")
+				handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "InvalidResponse"))
 				return
 			end
 
-			if type(body.song) ~= "table" then
-				set_queue_error(
-					THEME:GetString("ScreenQueueReady", "QueueUnavailable"),
-					THEME:GetString("ScreenQueueReady", "NoQueuedSong")
-				)
+			if type(body.song) ~= "table" or type(body.song.file_path) ~= "string" or body.song.file_path == "" then
+				queue_error_started_at = -1
+				set_queue_empty()
+				schedule_queue_poll()
 				frame:playcommand("Refresh")
 				return
 			end
@@ -242,25 +286,20 @@ local request_queue_song = function(frame)
 
 			target_song = find_target_song(queued_song_path)
 			if not target_song then
-				set_queue_error(
-					THEME:GetString("ScreenQueueReady", "QueueUnavailable"),
-					THEME:GetString("ScreenQueueReady", "MissingSong"):format(queued_song_path)
-				)
+				handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingSong"):format(queued_song_path))
 				frame:playcommand("Refresh")
 				return
 			end
 
 			available_steps = get_steps_for_current_style(target_song)
 			if #available_steps == 0 then
-				set_queue_error(
-					THEME:GetString("ScreenQueueReady", "QueueUnavailable"),
-					THEME:GetString("ScreenQueueReady", "MissingChart")
-				)
+				handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingChart"))
 				frame:playcommand("Refresh")
 				return
 			end
 
-			is_loading = false
+			queue_error_started_at = -1
+			set_queue_ready()
 			selected_index = find_step_index_for_difficulty(available_steps, queued_difficulty_name) or 1
 			apply_selected_chart()
 			frame:playcommand("Refresh")
@@ -316,6 +355,13 @@ local update_view = function(frame)
 		if state_title then state_title:settext(THEME:GetString("ScreenQueueReady", "LoadingTitle")) end
 		if state_detail then state_detail:settext(THEME:GetString("ScreenQueueReady", "LoadingPrompt")) end
 		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "LoadingFooter")) end
+		return
+	end
+
+	if queue_state == "empty" then
+		if state_title then state_title:settext(THEME:GetString("ScreenQueueReady", "EmptyTitle")) end
+		if state_detail then state_detail:settext(THEME:GetString("ScreenQueueReady", "EmptyDetail")) end
+		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "EmptyFooter")) end
 		return
 	end
 
@@ -384,12 +430,16 @@ input = function(event)
 			return true
 		end
 
+		if queue_state == "empty" then
+			return true
+		end
+
 		if queue_error_title ~= "" then
 			local underlay = top_screen and top_screen:GetChild("Underlay")
 			if underlay then
 				local snd = underlay:GetChild("change_sound")
 				if snd then snd:play() end
-				request_queue_song(underlay)
+				request_queue_song(underlay, true)
 			else
 				SCREENMAN:SystemMessage(THEME:GetString("ScreenQueueReady", "RequestFailed"))
 			end
@@ -440,6 +490,23 @@ local t = Def.ActorFrame{
 	OnCommand=function(self)
 		top_screen = SCREENMAN:GetTopScreen()
 		SL.Global.QueueModeActive = true
+		self:SetUpdateFunction(function(actor)
+			local now = GetTimeSinceStart()
+
+			if queue_request and (now - queue_request_started_at) >= queue_timeout_seconds then
+				queue_request:Cancel()
+				queue_request = nil
+				handle_queue_request_failure(
+					actor,
+					THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds)
+				)
+				return
+			end
+
+			if not queue_request and queue_next_poll_at > 0 and now >= queue_next_poll_at then
+				request_queue_song(actor, false)
+			end
+		end)
 		-- Keep Queue mode in a valid playmode for gameplay startup.
 		GAMESTATE:SetCurrentPlayMode("PlayMode_Regular")
 		local song_options = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
@@ -461,28 +528,7 @@ local t = Def.ActorFrame{
 			top_screen:AddInputCallback(input)
 		end
 
-		request_queue_song(self)
-	end,
-
-	QueueRequestLoopCommand=function(self)
-		if not queue_request then
-			return
-		end
-
-		local elapsed = GetTimeSinceStart() - queue_request_started_at
-		if elapsed >= queue_timeout_seconds then
-			queue_request:Cancel()
-			queue_request = nil
-			queue_request_id = queue_request_id + 1
-			set_queue_error(
-				THEME:GetString("ScreenQueueReady", "ConnectionError"),
-				THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds)
-			)
-			self:playcommand("Refresh")
-			return
-		end
-
-		self:sleep(0.25):queuecommand("QueueRequestLoop")
+		request_queue_song(self, true)
 	end,
 
 	OffCommand=function(self)
@@ -490,6 +536,8 @@ local t = Def.ActorFrame{
 			queue_request:Cancel()
 			queue_request = nil
 		end
+		self:SetUpdateFunction(nil)
+		queue_next_poll_at = -1
 		if top_screen then
 			top_screen:RemoveInputCallback(input)
 		end
