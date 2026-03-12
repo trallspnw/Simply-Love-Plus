@@ -24,6 +24,9 @@ local input
 local queue_request
 local apply_selected_chart
 
+local banner_width = 418
+local banner_height = 164
+
 local is_start_button = function(event)
 	local game_button = event and event.GameButton or ""
 	local menu_button = event and event.MenuButton or ""
@@ -344,6 +347,56 @@ local transition_to = function(screen_name)
 	top_screen:StartTransitioningScreen("SM_GoToNextScreen")
 end
 
+local update_banner = function(sprite)
+	local song = GAMESTATE:GetCurrentSong()
+	if not song or PREFSMAN:GetPreference("ShowBanners") == false or not song:HasBanner() then
+		sprite:visible(false)
+		return false
+	end
+
+	sprite:visible(true)
+	sprite:Load(song:GetBannerPath())
+	sprite:scaletoclipped(banner_width, banner_height)
+	return true
+end
+
+local update_song_detail_strip = function(frame)
+	local song = GAMESTATE:GetCurrentSong()
+	local values = frame:GetChild("Values")
+	local artist_value = values and values:GetChild("ArtistValue")
+	local bpm_value = values and values:GetChild("BpmValue")
+	local length_value = values and values:GetChild("LengthValue")
+
+	if not song then
+		if artist_value then artist_value:settext("") end
+		if bpm_value then bpm_value:settext("") end
+		if length_value then length_value:settext("") end
+		return
+	end
+
+	if artist_value then
+		artist_value:settext(song:GetDisplayArtist() or "")
+	end
+
+	if bpm_value then
+		bpm_value:settext(StringifyDisplayBPMs() or "")
+	end
+
+	if length_value then
+		local seconds = song:MusicLengthSeconds()
+		if seconds then
+			seconds = seconds / SL.Global.ActiveModifiers.MusicRate
+			if seconds > 3600 then
+				length_value:settext(math.floor(seconds / 3600) .. ":" .. SecondsToMMSS(seconds % 3600))
+			else
+				length_value:settext(SecondsToMSS(seconds))
+			end
+		else
+			length_value:settext("")
+		end
+	end
+end
+
 local update_view = function(frame)
 	local loaded_content = frame:GetChild("LoadedContent")
 	local state_overlay = frame:GetChild("StateOverlay")
@@ -384,7 +437,9 @@ local update_view = function(frame)
 	local song_text = loaded_content and loaded_content:GetChild("SongText")
 	local artist_text = loaded_content and loaded_content:GetChild("ArtistText")
 	local error_text = loaded_content and loaded_content:GetChild("ErrorText")
-	local prompt_text = loaded_content and loaded_content:GetChild("PromptText")
+	local banner_fallback = loaded_content and loaded_content:GetChild("ServerBannerFallback")
+	local banner_sprite = loaded_content and loaded_content:GetChild("ServerBanner")
+	local detail_strip = loaded_content and loaded_content:GetChild("SongDetailStrip")
 
 	local subtitle = target_song:GetDisplaySubTitle() or ""
 	local title = target_song:GetDisplayMainTitle() or ""
@@ -396,9 +451,15 @@ local update_view = function(frame)
 	user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer"))
 	song_text:settext(title)
 	artist_text:settext(target_song:GetDisplayArtist() or "")
-
-	if prompt_text then
-		prompt_text:zoom(0.75):settext(THEME:GetString("ScreenQueueReady", "ReadyPrompt"))
+	local has_banner = false
+	if banner_sprite then
+		has_banner = update_banner(banner_sprite)
+	end
+	if banner_fallback then
+		banner_fallback:visible(not has_banner)
+	end
+	if detail_strip then
+		update_song_detail_strip(detail_strip)
 	end
 end
 
@@ -557,17 +618,86 @@ local t = Def.ActorFrame{
 
 	Def.ActorFrame{
 		Name="LoadedContent",
+		Def.ActorFrame{
+			InitCommand=function(self)
+				if IsUsingWideScreen() then
+					self:zoom(0.7655):xy(_screen.cx - 170, 96)
+				else
+					self:zoom(0.75):xy(_screen.cx - 166, 96)
+				end
+			end,
+
+			Def.Sprite{
+				Name="ServerBannerFallback",
+				Texture=GetFallbackBanner(),
+				InitCommand=function(self)
+					self:setsize(banner_width, banner_height)
+				end
+			},
+
+			Def.Sprite{
+				Name="ServerBanner",
+				InitCommand=function(self)
+					self:setsize(banner_width, banner_height)
+				end
+			},
+		},
+
+		Def.ActorFrame{
+			Name="SongDetailStrip",
+			InitCommand=function(self)
+				self:xy(_screen.cx - (IsUsingWideScreen() and 170 or 165), _screen.cy - 55)
+			end,
+
+			Def.Quad{
+				InitCommand=function(self)
+					self:setsize(IsUsingWideScreen() and 320 or 310, 50):diffuse(color("#1e282f"))
+					if ThemePrefs.Get("RainbowMode") then self:diffusealpha(0.9) end
+					if ThemePrefs.Get("VisualStyle") == "Technique" then
+						self:diffusealpha(0.5)
+					end
+				end
+			},
+
+			Def.ActorFrame{
+				Name="Values",
+				InitCommand=function(self) self:xy(-110, -6) end,
+
+				LoadFont("Common Normal")..{
+					Text=THEME:GetString("SongDescription", "Artist"):upper(),
+					InitCommand=function(self) self:align(1,0):y(-11):maxwidth(44):diffuse(0.5,0.5,0.5,1) end,
+				},
+				LoadFont("Common Normal")..{
+					Name="ArtistValue",
+					InitCommand=function(self) self:align(0,0):xy(5,-11):maxwidth((IsUsingWideScreen() and 320 or 310) - 60) end,
+				},
+
+				LoadFont("Common Normal")..{
+					Text=THEME:GetString("SongDescription", "BPM"):upper(),
+					InitCommand=function(self) self:align(1,0):y(10):diffuse(0.5,0.5,0.5,1) end,
+				},
+				LoadFont("Common Normal")..{
+					Name="BpmValue",
+					InitCommand=function(self) self:align(0,0.5):xy(5,17):vertspacing(-8) end,
+				},
+
+				LoadFont("Common Normal")..{
+					Text=THEME:GetString("SongDescription", "Length"):upper(),
+					InitCommand=function(self)
+						self:align(1,0):diffuse(0.5,0.5,0.5,1)
+						self:x((IsUsingWideScreen() and 320 or 310) - 130):y(10)
+					end
+				},
+				LoadFont("Common Normal")..{
+					Name="LengthValue",
+					InitCommand=function(self) self:align(0,0):xy((IsUsingWideScreen() and 320 or 310) - 125, 10) end,
+				},
+			},
+		},
+
 		Def.Quad{
 			InitCommand=function(self)
 				self:Center():zoomto(620, 160):diffuse(color("#000000")):diffusealpha(0.65):y(-100)
-			end
-		},
-
-		LoadFont("Common Bold")..{
-			Name="PromptText",
-			Text=THEME:GetString("ScreenQueueReady", "ReadyPrompt"),
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy - 150):zoom(0.75)
 			end
 		},
 
