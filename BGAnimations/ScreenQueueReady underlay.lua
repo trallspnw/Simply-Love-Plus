@@ -4,13 +4,15 @@ local top_screen
 local target_song
 local available_steps = {}
 local selected_index = 1
+local queue_timeout_seconds = 10
+local queue_request_started_at = -1
+local queue_request_id = 0
 local queued_song_path = ""
 local queued_difficulty_name = ""
 local queued_player_name = ""
-local queue_error = ""
+local queue_error_title = ""
+local queue_error_detail = ""
 local is_loading = true
-local showing_exit_confirm = false
-local exit_choice_yes = true
 local last_up_press = 0
 local last_down_press = 0
 local double_tap_window = 0.33
@@ -114,6 +116,46 @@ local get_player_name = function(player_data)
 	return player_data.display_name or player_data.username or player_data.name or ""
 end
 
+local set_queue_error = function(title, detail)
+	queue_error_title = title or ""
+	queue_error_detail = detail or ""
+	is_loading = false
+end
+
+local clear_queue_error = function()
+	queue_error_title = ""
+	queue_error_detail = ""
+end
+
+local queue_has_loaded_song = function()
+	return (not is_loading) and queue_error_title == ""
+end
+
+local get_response_error_detail = function(response, body)
+	if response and response.error and ToEnumShortString(response.error) == "Timeout" then
+		return THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds)
+	end
+
+	if type(body) == "table" then
+		if type(body.error) == "string" and body.error ~= "" then
+			return body.error
+		end
+		if type(body.message) == "string" and body.message ~= "" then
+			return body.message
+		end
+	end
+
+	if response and response.statusCode then
+		return THEME:GetString("ScreenQueueReady", "RequestStatus"):format(response.statusCode)
+	end
+
+	if response and response.error then
+		return tostring(response.error)
+	end
+
+	return THEME:GetString("ScreenQueueReady", "RequestFailed")
+end
+
 local request_queue_song = function(frame)
 	if not frame then return end
 
@@ -127,8 +169,10 @@ local request_queue_song = function(frame)
 	queued_song_path = ""
 	queued_difficulty_name = ""
 	queued_player_name = ""
-	queue_error = ""
 	is_loading = true
+	clear_queue_error()
+	queue_request_started_at = GetTimeSinceStart()
+	queue_request_id = queue_request_id + 1
 
 	if queue_request then
 		queue_request:Cancel()
@@ -136,13 +180,18 @@ local request_queue_song = function(frame)
 	end
 
 	if base_url == "" or token == "" then
-		is_loading = false
-		queue_error = THEME:GetString("ScreenQueueReady", "MissingConfig")
+		set_queue_error(
+			THEME:GetString("ScreenQueueReady", "ConnectionError"),
+			THEME:GetString("ScreenQueueReady", "MissingConfig")
+		)
 		frame:playcommand("Refresh")
 		return
 	end
 
 	frame:playcommand("Refresh")
+	frame:queuecommand("QueueRequestLoop")
+
+	local current_request_id = queue_request_id
 
 	queue_request = NETWORK:HttpRequest{
 		url=base_url .. QUEUE_ENDPOINT,
@@ -150,21 +199,39 @@ local request_queue_song = function(frame)
 		headers={
 			Authorization="Bearer " .. token,
 		},
-		connectTimeout=10,
-		transferTimeout=10,
+		connectTimeout=queue_timeout_seconds,
+		transferTimeout=queue_timeout_seconds,
 		onResponse=function(response)
+			if current_request_id ~= queue_request_id then
+				return
+			end
+
 			queue_request = nil
-			is_loading = false
+			local body = JsonDecode(response and response.body or "")
 
 			if not response or response.statusCode ~= 200 then
-				queue_error = THEME:GetString("ScreenQueueReady", "RequestFailed")
+				set_queue_error(
+					THEME:GetString("ScreenQueueReady", "ConnectionError"),
+					get_response_error_detail(response, body)
+				)
 				frame:playcommand("Refresh")
 				return
 			end
 
-			local body = JsonDecode(response.body or "")
-			if type(body) ~= "table" or type(body.song) ~= "table" then
-				queue_error = THEME:GetString("ScreenQueueReady", "NoQueuedSong")
+			if type(body) ~= "table" then
+				set_queue_error(
+					THEME:GetString("ScreenQueueReady", "ConnectionError"),
+					THEME:GetString("ScreenQueueReady", "InvalidResponse")
+				)
+				frame:playcommand("Refresh")
+				return
+			end
+
+			if type(body.song) ~= "table" then
+				set_queue_error(
+					THEME:GetString("ScreenQueueReady", "QueueUnavailable"),
+					THEME:GetString("ScreenQueueReady", "NoQueuedSong")
+				)
 				frame:playcommand("Refresh")
 				return
 			end
@@ -175,18 +242,25 @@ local request_queue_song = function(frame)
 
 			target_song = find_target_song(queued_song_path)
 			if not target_song then
-				queue_error = THEME:GetString("ScreenQueueReady", "MissingSong"):format(queued_song_path)
+				set_queue_error(
+					THEME:GetString("ScreenQueueReady", "QueueUnavailable"),
+					THEME:GetString("ScreenQueueReady", "MissingSong"):format(queued_song_path)
+				)
 				frame:playcommand("Refresh")
 				return
 			end
 
 			available_steps = get_steps_for_current_style(target_song)
 			if #available_steps == 0 then
-				queue_error = THEME:GetString("ScreenQueueReady", "MissingChart")
+				set_queue_error(
+					THEME:GetString("ScreenQueueReady", "QueueUnavailable"),
+					THEME:GetString("ScreenQueueReady", "MissingChart")
+				)
 				frame:playcommand("Refresh")
 				return
 			end
 
+			is_loading = false
 			selected_index = find_step_index_for_difficulty(available_steps, queued_difficulty_name) or 1
 			apply_selected_chart()
 			frame:playcommand("Refresh")
@@ -224,40 +298,39 @@ local transition_to = function(screen_name)
 end
 
 local update_view = function(frame)
-	local user_text = frame:GetChild("UsernameText")
-	local song_text = frame:GetChild("SongText")
-	local artist_text = frame:GetChild("ArtistText")
-	local error_text = frame:GetChild("ErrorText")
-	local prompt_text = frame:GetChild("PromptText")
-	local exit_overlay = frame:GetChild("ExitConfirm")
-	local exit_choice = exit_overlay and exit_overlay:GetChild("ChoiceText")
+	local loaded_content = frame:GetChild("LoadedContent")
+	local state_overlay = frame:GetChild("StateOverlay")
+	local state_title = state_overlay and state_overlay:GetChild("StateTitle")
+	local state_detail = state_overlay and state_overlay:GetChild("StateDetail")
+	local state_footer = state_overlay and state_overlay:GetChild("StateFooter")
 
-	if exit_overlay and exit_choice then
-		exit_overlay:visible(showing_exit_confirm)
-		exit_choice:settext(exit_choice_yes and "Yes" or "No")
+	if loaded_content then
+		loaded_content:visible(queue_has_loaded_song())
+	end
+
+	if state_overlay then
+		state_overlay:visible(not queue_has_loaded_song())
 	end
 
 	if is_loading then
-		error_text:settext("")
-		user_text:settext("")
-		song_text:settext(THEME:GetString("ScreenQueueReady", "Loading"))
-		artist_text:settext("")
-		if prompt_text then
-			prompt_text:zoom(0.65):settext(THEME:GetString("ScreenQueueReady", "LoadingPrompt"))
-		end
+		if state_title then state_title:settext(THEME:GetString("ScreenQueueReady", "LoadingTitle")) end
+		if state_detail then state_detail:settext(THEME:GetString("ScreenQueueReady", "LoadingPrompt")) end
+		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "LoadingFooter")) end
 		return
 	end
 
-	if queue_error ~= "" then
-		error_text:settext(queue_error)
-		user_text:settext(queued_player_name)
-		song_text:settext(queued_song_path)
-		artist_text:settext("")
-		if prompt_text then
-			prompt_text:zoom(0.65):settext(THEME:GetString("ScreenQueueReady", "ReadyPrompt"))
-		end
+	if queue_error_title ~= "" then
+		if state_title then state_title:settext(queue_error_title) end
+		if state_detail then state_detail:settext(queue_error_detail) end
+		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "ErrorFooter")) end
 		return
 	end
+
+	local user_text = loaded_content and loaded_content:GetChild("UsernameText")
+	local song_text = loaded_content and loaded_content:GetChild("SongText")
+	local artist_text = loaded_content and loaded_content:GetChild("ArtistText")
+	local error_text = loaded_content and loaded_content:GetChild("ErrorText")
+	local prompt_text = loaded_content and loaded_content:GetChild("PromptText")
 
 	local subtitle = target_song:GetDisplaySubTitle() or ""
 	local title = target_song:GetDisplayMainTitle() or ""
@@ -278,41 +351,8 @@ end
 input = function(event)
 	if not event or event.type == "InputEventType_Release" then return false end
 
-	if showing_exit_confirm then
-		if event.GameButton == "MenuLeft" or event.GameButton == "MenuRight" then
-			exit_choice_yes = not exit_choice_yes
-			local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
-			if snd then snd:play() end
-			top_screen:GetChild("Underlay"):playcommand("Refresh")
-			return true
-		end
-
-			if is_start_button(event) then
-				if exit_choice_yes then
-					local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("start_sound")
-					if snd then snd:play() end
-					SL.Global.QueueModeActive = false
-					transition_to("ScreenTitleMenu")
-				else
-					showing_exit_confirm = false
-				local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
-				if snd then snd:play() end
-				top_screen:GetChild("Underlay"):playcommand("Refresh")
-			end
-			return true
-		end
-
-		if is_back_button(event) then
-			showing_exit_confirm = false
-			local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
-			if snd then snd:play() end
-			top_screen:GetChild("Underlay"):playcommand("Refresh")
-			return true
-		end
-	end
-
 	if event.GameButton == "MenuUp" then
-		if is_loading or queue_error ~= "" then return true end
+		if is_loading or queue_error_title ~= "" then return true end
 		local now = GetTimeSinceStart()
 		if #available_steps > 0 and (now - last_up_press) <= double_tap_window then
 			selected_index = ((selected_index - 2) % #available_steps) + 1
@@ -326,7 +366,7 @@ input = function(event)
 	end
 
 	if event.GameButton == "MenuDown" then
-		if is_loading or queue_error ~= "" then return true end
+		if is_loading or queue_error_title ~= "" then return true end
 		local now = GetTimeSinceStart()
 		if #available_steps > 0 and (now - last_down_press) <= double_tap_window then
 			selected_index = (selected_index % #available_steps) + 1
@@ -341,13 +381,14 @@ input = function(event)
 
 	if is_start_button(event) then
 		if is_loading then
-			SCREENMAN:SystemMessage(THEME:GetString("ScreenQueueReady", "StillLoading"))
 			return true
 		end
 
-		if queue_error ~= "" then
+		if queue_error_title ~= "" then
 			local underlay = top_screen and top_screen:GetChild("Underlay")
 			if underlay then
+				local snd = underlay:GetChild("change_sound")
+				if snd then snd:play() end
 				request_queue_song(underlay)
 			else
 				SCREENMAN:SystemMessage(THEME:GetString("ScreenQueueReady", "RequestFailed"))
@@ -385,11 +426,10 @@ input = function(event)
 	end
 
 	if is_back_button(event) then
-		showing_exit_confirm = true
-		exit_choice_yes = true
 		local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
 		if snd then snd:play() end
-		top_screen:GetChild("Underlay"):playcommand("Refresh")
+		SL.Global.QueueModeActive = false
+		transition_to("ScreenTitleMenu")
 		return true
 	end
 
@@ -411,15 +451,10 @@ local t = Def.ActorFrame{
 			GAMESTATE:JoinPlayer(PLAYER_1)
 		end
 
-		target_song = find_target_song()
-		available_steps = get_steps_for_current_style(target_song)
 		selected_index = 1
-		showing_exit_confirm = false
-		exit_choice_yes = true
 		last_up_press = 0
 		last_down_press = 0
 
-		apply_selected_chart()
 		self:playcommand("Refresh")
 
 		if top_screen then
@@ -427,6 +462,27 @@ local t = Def.ActorFrame{
 		end
 
 		request_queue_song(self)
+	end,
+
+	QueueRequestLoopCommand=function(self)
+		if not queue_request then
+			return
+		end
+
+		local elapsed = GetTimeSinceStart() - queue_request_started_at
+		if elapsed >= queue_timeout_seconds then
+			queue_request:Cancel()
+			queue_request = nil
+			queue_request_id = queue_request_id + 1
+			set_queue_error(
+				THEME:GetString("ScreenQueueReady", "ConnectionError"),
+				THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds)
+			)
+			self:playcommand("Refresh")
+			return
+		end
+
+		self:sleep(0.25):queuecommand("QueueRequestLoop")
 	end,
 
 	OffCommand=function(self)
@@ -443,101 +499,104 @@ local t = Def.ActorFrame{
 		update_view(self)
 	end,
 
-	Def.Quad{
-		InitCommand=function(self)
-			self:Center():zoomto(620, 160):diffuse(color("#000000")):diffusealpha(0.65):y(-100)
-		end
-	},
-
-	LoadFont("Common Bold")..{
-		Name="PromptText",
-		Text=THEME:GetString("ScreenQueueReady", "ReadyPrompt"),
-		InitCommand=function(self)
-			self:xy(_screen.cx, _screen.cy - 150):zoom(0.75)
-		end
-	},
-
-	Def.Quad{
-		Name="UsernameBox",
-		InitCommand=function(self)
-			self:xy(_screen.cx + 240, _screen.cy + 2):zoomto(360, 34):diffuse(color("#000000")):diffusealpha(0.45)
-		end
-	},
-
-	Def.Quad{
-		Name="SongArtistBox",
-		InitCommand=function(self)
-			self:xy(_screen.cx + 240, _screen.cy + 94):zoomto(360, 134):diffuse(color("#000000")):diffusealpha(0.45)
-		end
-	},
-
-	LoadFont("Common Normal")..{
-		Name="UsernameText",
-		InitCommand=function(self)
-			self:xy(_screen.cx + 70, _screen.cy + 2):zoom(1.75):horizalign(0):maxwidth(420)
-		end
-	},
-
-	LoadFont("Common Normal")..{
-		Name="SongText",
-		InitCommand=function(self)
-			self:xy(_screen.cx + 70, _screen.cy + 34):zoom(1.9):horizalign(0):vertalign(top):maxwidth(400)
-		end
-	},
-
-	LoadFont("Common Normal")..{
-		Name="ArtistText",
-		InitCommand=function(self)
-			self:xy(_screen.cx + 70, _screen.cy + 132):zoom(1.35):horizalign(0):maxwidth(500):diffuse(color("#cccccc"))
-		end
-	},
-
-	LoadFont("Common Normal")..{
-		Name="ErrorText",
-		InitCommand=function(self)
-			self:xy(_screen.cx, _screen.cy + 108):zoom(0.65):maxwidth(900):diffuse(color("#ff6666"))
-		end
-	},
-
 	Def.ActorFrame{
-		Name="ExitConfirm",
-		InitCommand=function(self)
-			self:visible(false):draworder(9999)
-		end,
-
+		Name="LoadedContent",
 		Def.Quad{
 			InitCommand=function(self)
-				self:Center():zoomto(340, 110):diffuse(color("#000000")):diffusealpha(0.85)
+				self:Center():zoomto(620, 160):diffuse(color("#000000")):diffusealpha(0.65):y(-100)
 			end
 		},
 
 		LoadFont("Common Bold")..{
-			Text="Exit Queue Mode?",
+			Name="PromptText",
+			Text=THEME:GetString("ScreenQueueReady", "ReadyPrompt"),
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy - 16):zoom(0.7)
+				self:xy(_screen.cx, _screen.cy - 150):zoom(0.75)
+			end
+		},
+
+		Def.Quad{
+			Name="UsernameBox",
+			InitCommand=function(self)
+				self:xy(_screen.cx + 240, _screen.cy + 2):zoomto(360, 34):diffuse(color("#000000")):diffusealpha(0.45)
+			end
+		},
+
+		Def.Quad{
+			Name="SongArtistBox",
+			InitCommand=function(self)
+				self:xy(_screen.cx + 240, _screen.cy + 94):zoomto(360, 134):diffuse(color("#000000")):diffusealpha(0.45)
 			end
 		},
 
 		LoadFont("Common Normal")..{
-			Name="ChoiceText",
+			Name="UsernameText",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 10):zoom(0.8):diffuse(GetCurrentColor())
+				self:xy(_screen.cx + 70, _screen.cy + 2):zoom(1.75):horizalign(0):maxwidth(420)
 			end
 		},
 
 		LoadFont("Common Normal")..{
-			Text="LEFT/RIGHT choose  START confirm  BACK cancel",
+			Name="SongText",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 34):zoom(0.6):diffuse(color("#bbbbbb"))
+				self:xy(_screen.cx + 70, _screen.cy + 34):zoom(1.9):horizalign(0):vertalign(top):maxwidth(400)
+			end
+		},
+
+		LoadFont("Common Normal")..{
+			Name="ArtistText",
+			InitCommand=function(self)
+				self:xy(_screen.cx + 70, _screen.cy + 132):zoom(1.35):horizalign(0):maxwidth(500):diffuse(color("#cccccc"))
+			end
+		},
+
+		LoadFont("Common Normal")..{
+			Name="ErrorText",
+			InitCommand=function(self)
+				self:xy(_screen.cx, _screen.cy + 108):zoom(0.65):maxwidth(900):diffuse(color("#ff6666"))
+			end
+		},
+
+		-- Reuse SelectMusic's existing widgets so Queue mode shows the same
+		-- difficulty picker and chart stats UI.
+		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PaneDisplay.lua")),
+		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PerPlayer/default.lua")),
+		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/StepsDisplayList/default.lua")),
+	},
+
+	Def.ActorFrame{
+		Name="StateOverlay",
+		InitCommand=function(self)
+			self:visible(false)
+		end,
+
+		Def.Quad{
+			InitCommand=function(self)
+				self:Center():zoomto(720, 220):diffuse(color("#000000")):diffusealpha(0.78)
+			end
+		},
+
+		LoadFont("Common Bold")..{
+			Name="StateTitle",
+			InitCommand=function(self)
+				self:xy(_screen.cx, _screen.cy - 44):zoom(0.85):maxwidth(700)
+			end
+		},
+
+		LoadFont("Common Normal")..{
+			Name="StateDetail",
+			InitCommand=function(self)
+				self:xy(_screen.cx, _screen.cy + 2):zoom(0.72):maxwidth(860):wrapwidthpixels(840)
+			end
+		},
+
+		LoadFont("Common Normal")..{
+			Name="StateFooter",
+			InitCommand=function(self)
+				self:xy(_screen.cx, _screen.cy + 72):zoom(0.62):maxwidth(900):diffuse(color("#bbbbbb"))
 			end
 		},
 	},
-
-	-- Reuse SelectMusic's existing widgets so Queue mode shows the same
-	-- difficulty picker and chart stats UI.
-	LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PaneDisplay.lua")),
-	LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PerPlayer/default.lua")),
-	LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/StepsDisplayList/default.lua")),
 }
 
 t[#t+1] = LoadActor( THEME:GetPathS("ScreenSelectMaster", "change") )..{ Name="change_sound", IsAction=true, SupportPan=false }
