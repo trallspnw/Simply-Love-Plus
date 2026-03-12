@@ -7,8 +7,8 @@ local selected_index = 1
 local queue_state = "loading"
 local queue_timeout_seconds = 10
 local queue_request_started_at = -1
-local queue_error_started_at = -1
-local queue_error_grace_seconds = 15
+local queue_consecutive_failures = 0
+local queue_failure_threshold = 3
 local queue_poll_interval_seconds = 5
 local queue_next_poll_at = -1
 local queued_song_path = ""
@@ -156,6 +156,19 @@ local queue_has_loaded_song = function()
 	return queue_state == "ready"
 end
 
+local safe_json_decode = function(body)
+	if type(body) ~= "string" or body == "" then
+		return nil
+	end
+
+	local ok, decoded = pcall(JsonDecode, body)
+	if ok then
+		return decoded
+	end
+
+	return nil
+end
+
 local get_response_error_detail = function(response, body)
 	if response and response.error and ToEnumShortString(response.error) == "Timeout" then
 		return THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds)
@@ -186,13 +199,9 @@ local schedule_queue_poll = function()
 end
 
 local handle_queue_request_failure = function(frame, detail)
-	local now = GetTimeSinceStart()
+	queue_consecutive_failures = queue_consecutive_failures + 1
 
-	if queue_error_started_at < 0 then
-		queue_error_started_at = now
-	end
-
-	if (now - queue_error_started_at) >= queue_error_grace_seconds then
+	if queue_consecutive_failures >= queue_failure_threshold then
 		set_queue_error(
 			THEME:GetString("ScreenQueueReady", "ConnectionError"),
 			detail
@@ -260,7 +269,7 @@ local request_queue_song = function(frame, show_loading)
 		transferTimeout=queue_timeout_seconds,
 		onResponse=function(response)
 			queue_request = nil
-			local body = JsonDecode(response and response.body or "")
+			local body = safe_json_decode(response and response.body or "")
 
 			if not response or response.statusCode ~= 200 then
 				handle_queue_request_failure(frame, get_response_error_detail(response, body))
@@ -272,8 +281,8 @@ local request_queue_song = function(frame, show_loading)
 				return
 			end
 
+			queue_consecutive_failures = 0
 			if type(body.song) ~= "table" or type(body.song.file_path) ~= "string" or body.song.file_path == "" then
-				queue_error_started_at = -1
 				set_queue_empty()
 				schedule_queue_poll()
 				frame:playcommand("Refresh")
@@ -298,7 +307,6 @@ local request_queue_song = function(frame, show_loading)
 				return
 			end
 
-			queue_error_started_at = -1
 			set_queue_ready()
 			selected_index = find_step_index_for_difficulty(available_steps, queued_difficulty_name) or 1
 			apply_selected_chart()
