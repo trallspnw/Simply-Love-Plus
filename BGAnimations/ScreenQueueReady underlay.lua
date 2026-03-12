@@ -1,16 +1,22 @@
-local TARGET_SONG_DIR = "songs/1arc1998 - ddr [i]/butterfly/"
-local PLACEHOLDER_USER = "Username_placeholder"
+local QUEUE_ENDPOINT = "/api/game/song/current"
 
 local top_screen
 local target_song
 local available_steps = {}
 local selected_index = 1
+local queued_song_path = ""
+local queued_difficulty_name = ""
+local queued_player_name = ""
+local queue_error = ""
+local is_loading = true
 local showing_exit_confirm = false
 local exit_choice_yes = true
 local last_up_press = 0
 local last_down_press = 0
 local double_tap_window = 0.33
 local input
+local queue_request
+local apply_selected_chart
 
 local is_start_button = function(event)
 	local game_button = event and event.GameButton or ""
@@ -42,14 +48,17 @@ local is_back_button = function(event)
 end
 
 local normalize = function(path)
-	return (path or ""):gsub("\\", "/"):lower()
+	return (path or ""):gsub("\\", "/"):gsub("^/*", ""):gsub("/*$", ""):lower()
 end
 
-local find_target_song = function()
+local find_target_song = function(song_dir)
 	local songs = SONGMAN:GetAllSongs() or {}
+	local target_dir = normalize(song_dir)
+	if target_dir == "" then return nil end
+
 	for song in ivalues(songs) do
 		local dir = normalize(song:GetSongDir())
-		if dir:find(TARGET_SONG_DIR, 1, true) then
+		if dir == target_dir then
 			return song
 		end
 	end
@@ -78,7 +87,114 @@ local get_steps_for_current_style = function(song)
 	return filtered
 end
 
-local apply_selected_chart = function()
+local find_step_index_for_difficulty = function(steps_list, difficulty_name)
+	local normalized_name = normalize(difficulty_name)
+	if normalized_name == "" then return nil end
+
+	for i, chart in ipairs(steps_list) do
+		local display_name = normalize(chart:GetDifficulty())
+		local meter_name = normalize(ToEnumShortString(chart:GetDifficulty()))
+		if display_name == normalized_name or meter_name == normalized_name then
+			return i
+		end
+	end
+
+	return nil
+end
+
+local get_player_name = function(player_data)
+	if type(player_data) == "string" then
+		return player_data:gsub("^%s*(.-)%s*$", "%1")
+	end
+
+	if type(player_data) ~= "table" then
+		return ""
+	end
+
+	return player_data.display_name or player_data.username or player_data.name or ""
+end
+
+local request_queue_song = function(frame)
+	if not frame then return end
+
+	local config = (SL.Global and SL.Global.StepManiaServer) or {}
+	local base_url = config.Url or ""
+	local token = config.Token or ""
+
+	target_song = nil
+	available_steps = {}
+	selected_index = 1
+	queued_song_path = ""
+	queued_difficulty_name = ""
+	queued_player_name = ""
+	queue_error = ""
+	is_loading = true
+
+	if queue_request then
+		queue_request:Cancel()
+		queue_request = nil
+	end
+
+	if base_url == "" or token == "" then
+		is_loading = false
+		queue_error = THEME:GetString("ScreenQueueReady", "MissingConfig")
+		frame:playcommand("Refresh")
+		return
+	end
+
+	frame:playcommand("Refresh")
+
+	queue_request = NETWORK:HttpRequest{
+		url=base_url .. QUEUE_ENDPOINT,
+		method="GET",
+		headers={
+			Authorization="Bearer " .. token,
+		},
+		connectTimeout=10,
+		transferTimeout=10,
+		onResponse=function(response)
+			queue_request = nil
+			is_loading = false
+
+			if not response or response.statusCode ~= 200 then
+				queue_error = THEME:GetString("ScreenQueueReady", "RequestFailed")
+				frame:playcommand("Refresh")
+				return
+			end
+
+			local body = JsonDecode(response.body or "")
+			if type(body) ~= "table" or type(body.song) ~= "table" then
+				queue_error = THEME:GetString("ScreenQueueReady", "NoQueuedSong")
+				frame:playcommand("Refresh")
+				return
+			end
+
+			queued_song_path = body.song.file_path or ""
+			queued_difficulty_name = body.song.difficulty_name or ""
+			queued_player_name = get_player_name(body.player)
+
+			target_song = find_target_song(queued_song_path)
+			if not target_song then
+				queue_error = THEME:GetString("ScreenQueueReady", "MissingSong"):format(queued_song_path)
+				frame:playcommand("Refresh")
+				return
+			end
+
+			available_steps = get_steps_for_current_style(target_song)
+			if #available_steps == 0 then
+				queue_error = THEME:GetString("ScreenQueueReady", "MissingChart")
+				frame:playcommand("Refresh")
+				return
+			end
+
+			selected_index = find_step_index_for_difficulty(available_steps, queued_difficulty_name) or 1
+			apply_selected_chart()
+			frame:playcommand("Refresh")
+		end,
+	}
+end
+
+apply_selected_chart = function()
 	if not target_song or #available_steps == 0 then return end
 
 	local steps = available_steps[selected_index]
@@ -116,11 +232,30 @@ local update_view = function(frame)
 	local exit_overlay = frame:GetChild("ExitConfirm")
 	local exit_choice = exit_overlay and exit_overlay:GetChild("ChoiceText")
 
-	if not target_song then
-		error_text:settext(THEME:GetString("ScreenQueueReady", "MissingSong"):format(TARGET_SONG_DIR))
+	if exit_overlay and exit_choice then
+		exit_overlay:visible(showing_exit_confirm)
+		exit_choice:settext(exit_choice_yes and "Yes" or "No")
+	end
+
+	if is_loading then
+		error_text:settext("")
 		user_text:settext("")
-		song_text:settext("")
+		song_text:settext(THEME:GetString("ScreenQueueReady", "Loading"))
 		artist_text:settext("")
+		if prompt_text then
+			prompt_text:zoom(0.65):settext(THEME:GetString("ScreenQueueReady", "LoadingPrompt"))
+		end
+		return
+	end
+
+	if queue_error ~= "" then
+		error_text:settext(queue_error)
+		user_text:settext(queued_player_name)
+		song_text:settext(queued_song_path)
+		artist_text:settext("")
+		if prompt_text then
+			prompt_text:zoom(0.65):settext(THEME:GetString("ScreenQueueReady", "ReadyPrompt"))
+		end
 		return
 	end
 
@@ -131,17 +266,12 @@ local update_view = function(frame)
 	end
 
 	error_text:settext("")
-	user_text:settext(PLACEHOLDER_USER)
+	user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer"))
 	song_text:settext(title)
 	artist_text:settext(target_song:GetDisplayArtist() or "")
 
 	if prompt_text then
-		prompt_text:zoom(0.75)
-	end
-
-	if exit_overlay and exit_choice then
-		exit_overlay:visible(showing_exit_confirm)
-		exit_choice:settext(exit_choice_yes and "Yes" or "No")
+		prompt_text:zoom(0.75):settext(THEME:GetString("ScreenQueueReady", "ReadyPrompt"))
 	end
 end
 
@@ -182,6 +312,7 @@ input = function(event)
 	end
 
 	if event.GameButton == "MenuUp" then
+		if is_loading or queue_error ~= "" then return true end
 		local now = GetTimeSinceStart()
 		if #available_steps > 0 and (now - last_up_press) <= double_tap_window then
 			selected_index = ((selected_index - 2) % #available_steps) + 1
@@ -195,6 +326,7 @@ input = function(event)
 	end
 
 	if event.GameButton == "MenuDown" then
+		if is_loading or queue_error ~= "" then return true end
 		local now = GetTimeSinceStart()
 		if #available_steps > 0 and (now - last_down_press) <= double_tap_window then
 			selected_index = (selected_index % #available_steps) + 1
@@ -208,6 +340,21 @@ input = function(event)
 	end
 
 	if is_start_button(event) then
+		if is_loading then
+			SCREENMAN:SystemMessage(THEME:GetString("ScreenQueueReady", "StillLoading"))
+			return true
+		end
+
+		if queue_error ~= "" then
+			local underlay = top_screen and top_screen:GetChild("Underlay")
+			if underlay then
+				request_queue_song(underlay)
+			else
+				SCREENMAN:SystemMessage(THEME:GetString("ScreenQueueReady", "RequestFailed"))
+			end
+			return true
+		end
+
 		if GAMESTATE:GetNumSidesJoined() == 0 then
 			local joined = event.PlayerNumber and GAMESTATE:JoinInput(event.PlayerNumber)
 			if not joined then
@@ -278,9 +425,15 @@ local t = Def.ActorFrame{
 		if top_screen then
 			top_screen:AddInputCallback(input)
 		end
+
+		request_queue_song(self)
 	end,
 
 	OffCommand=function(self)
+		if queue_request then
+			queue_request:Cancel()
+			queue_request = nil
+		end
 		if top_screen then
 			top_screen:RemoveInputCallback(input)
 		end
