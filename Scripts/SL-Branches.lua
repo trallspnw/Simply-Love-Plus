@@ -47,7 +47,7 @@ SelectMusicOrCourse = function()
 	if GAMESTATE:IsCourseMode() then
 		return "ScreenSelectCourse"
 	else
-		if SL.Global.QueueModeActive or SL.Global.GameMode == "Queue" then
+		if SL.Global.ServerModeActive or SL.Global.GameMode == "Server" then
 			return "ScreenQueueReady"
 		end
 
@@ -146,7 +146,7 @@ end
 
 Branch.AfterEvaluationStage = function()
 	-- If we're in Casual mode, don't save the profile(s).
-	if SL.Global.GameMode == "Casual" or SL.Global.QueueModeActive or SL.Global.GameMode == "Queue" then
+	if SL.Global.GameMode == "Casual" or SL.Global.ServerModeActive or SL.Global.GameMode == "Server" then
 		return Branch.AfterProfileSave()
 	else
 		return "ScreenProfileSave"
@@ -229,7 +229,7 @@ Branch.AllowScreenEvalSummary = function()
 end
 
 Branch.AfterProfileSave = function()
-	if SL.Global.QueueModeActive or SL.Global.GameMode == "Queue" then
+	if SL.Global.ServerModeActive or SL.Global.GameMode == "Server" then
 		return "ScreenQueueReady"
 	end
 

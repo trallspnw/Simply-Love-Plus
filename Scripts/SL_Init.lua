@@ -145,7 +145,7 @@ local GlobalDefaults = {
 			}
 			self.TimeAtSessionStart = nil
 			self.SampleMusicLoops = ThemePrefs.Get("SampleMusicLoops")
-			self.QueueModeActive = false
+			self.ServerModeActive = false
 			self.StepManiaServer = StepManiaServerConfig and StepManiaServerConfig.Get() or { Url = "", Token = "" }
 
 			self.GameplayReloadCheck = false
@@ -481,10 +481,13 @@ SL = {
 	Downloads = {}
 }
 
--- Queue mode is a custom flow mode and currently reuses ITG judgment/scoring prefs.
-SL.Preferences.Queue = SL.Preferences.ITG
-SL.Metrics.Queue = SL.Metrics.ITG
-SL.JudgmentColors.Queue = SL.JudgmentColors.ITG
+-- Server mode is a custom flow mode and currently reuses ITG judgment/scoring prefs.
+SL.Preferences.Server = SL.Preferences.ITG
+SL.Metrics.Server = SL.Metrics.ITG
+SL.JudgmentColors.Server = SL.JudgmentColors.ITG
+SL.Preferences.Queue = SL.Preferences.Server
+SL.Metrics.Queue = SL.Metrics.Server
+SL.JudgmentColors.Queue = SL.JudgmentColors.Server
 
 
 -- Initialize preferences by calling this method.  We typically do

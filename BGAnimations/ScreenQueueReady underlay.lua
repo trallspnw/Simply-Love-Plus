@@ -473,12 +473,12 @@ input = function(event)
 			if song_options then
 				song_options:MusicRate(SL.Global.ActiveModifiers.MusicRate)
 			end
-			-- Run gameplay/eval with ITG string lookups while preserving queue loop flow.
-			SL.Global.QueueModeActive = true
-			SL.Global.GameMode = "ITG"
+			-- Server mode reuses ITG preferences/metrics while preserving its own mode key.
+			SL.Global.ServerModeActive = true
+			SL.Global.GameMode = "Server"
 			transition_to("ScreenGameplay")
 		else
-			SCREENMAN:SystemMessage("Queue mode could not start (missing player or chart).")
+			SCREENMAN:SystemMessage("Server mode could not start (missing player or chart).")
 		end
 		return true
 	end
@@ -486,7 +486,7 @@ input = function(event)
 	if is_back_button(event) then
 		local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
 		if snd then snd:play() end
-		SL.Global.QueueModeActive = false
+		SL.Global.ServerModeActive = false
 		transition_to("ScreenTitleMenu")
 		return true
 	end
@@ -497,7 +497,7 @@ end
 local t = Def.ActorFrame{
 	OnCommand=function(self)
 		top_screen = SCREENMAN:GetTopScreen()
-		SL.Global.QueueModeActive = true
+		SL.Global.ServerModeActive = true
 		self:SetUpdateFunction(function(actor)
 			local now = GetTimeSinceStart()
 
@@ -515,7 +515,7 @@ local t = Def.ActorFrame{
 				request_queue_song(actor, false)
 			end
 		end)
-		-- Keep Queue mode in a valid playmode for gameplay startup.
+		-- Keep Server mode in a valid playmode for gameplay startup.
 		GAMESTATE:SetCurrentPlayMode("PlayMode_Regular")
 		local song_options = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
 		if song_options then
@@ -613,7 +613,7 @@ local t = Def.ActorFrame{
 			end
 		},
 
-		-- Reuse SelectMusic's existing widgets so Queue mode shows the same
+		-- Reuse SelectMusic's existing widgets so Server mode shows the same
 		-- difficulty picker and chart stats UI.
 		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PaneDisplay.lua")),
 		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PerPlayer/default.lua")),

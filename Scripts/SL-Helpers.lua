@@ -362,6 +362,7 @@ SetGameModePreferences = function()
 	-- ITG has no prefix and scores go directly into the main Stats.xml
 	-- this was probably a Bad Decision™ on my part in hindsight  -quietly
 	prefix["ITG"] = ""
+	prefix["Server"] = ""
 	prefix["Queue"] = ""
 
 	prefix["Casual"] = "Casual-"

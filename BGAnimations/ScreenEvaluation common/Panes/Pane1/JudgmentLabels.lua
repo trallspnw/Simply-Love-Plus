@@ -4,7 +4,7 @@ local pn = ToEnumShortString(player)
 local stats = STATSMAN:GetCurStageStats():GetPlayerStageStats(pn)
 local pss = STATSMAN:GetCurStageStats():GetPlayerStageStats(player)
 
-local tns_string = "TapNoteScore" .. ((SL.Global.GameMode=="ITG" or SL.Global.GameMode=="Queue") and "" or SL.Global.GameMode)
+local tns_string = "TapNoteScore" .. ((SL.Global.GameMode=="ITG" or SL.Global.GameMode=="Server") and "" or SL.Global.GameMode)
 
 local firstToUpper = function(str)
     return (str:gsub("^%l", string.upper))
