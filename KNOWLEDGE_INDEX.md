@@ -21,6 +21,7 @@ This is the durable context index for this fork. Keep this file lightweight and 
 | Docs System | Rules for adding durable knowledge and keeping context lean. | [docs/README.md](./docs/README.md) | 2026-03-09 |
 | Fork Decisions Log | Ongoing record of fork-specific decisions and rationale. | [docs/change-log.md](./docs/change-log.md) | 2026-03-09 |
 | Feature Log | Chronological list of fork-only feature improvements versus upstream behavior. | [docs/feature-log.md](./docs/feature-log.md) | 2026-03-09 |
+| Theme Networking | Confirmed engine networking APIs available to theme Lua and how to apply them for queue mode. | [docs/theme-networking-capabilities.md](./docs/theme-networking-capabilities.md) | 2026-03-10 |
 
 ## Template For New Entries
 Use this row format when adding docs:
