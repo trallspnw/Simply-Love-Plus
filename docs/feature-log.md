@@ -12,6 +12,12 @@ Tracks fork-specific features and improvements added beyond upstream Simply Love
 ## Entries
 
 ### 2026-03-12
+- Feature: Server mode song-art debugging notes
+- Area: `docs/server-mode-song-art-debugging.md`, `KNOWLEDGE_INDEX.md`
+- Summary: Recorded confirmed findings from debugging Server prep-screen song art rendering and documented the recommended path to reuse the Casual song-art loader instead of continuing screen-local banner experiments.
+- Notes: Confirmed that theme PNGs render on `ScreenQueueReady`, while direct song-folder PNG rendering is unreliable or crashes depending on loader API.
+
+### 2026-03-12
 - Feature: Queue mode fetches current song from backend
 - Area: `BGAnimations/ScreenQueueReady underlay.lua`, `Languages/en.ini`
 - Summary: Replaced the hardcoded Queue mode song with a `GET /api/game/song/current` request using the configured machine-level server URL/token.
