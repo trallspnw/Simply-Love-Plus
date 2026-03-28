@@ -2,15 +2,9 @@
 
 Notes from debugging song-art rendering on `ScreenQueueReady` for Server mode.
 
-## Summary
+## Current Status
 
-The Server prep screen can render theme-owned PNG assets in the custom top-left art slot, but direct rendering of song-folder PNG assets from `/Songs/...` has been unreliable on this screen in this fork's current engine/runtime setup.
-
-Observed symptoms:
-
-- A plain `Def.Sprite:Load()` of `song:GetBannerPath()` produced a white rectangle.
-- Hardcoded direct loads of song-folder PNGs did render something, but the output was visibly corrupted/misdecoded instead of showing the expected image.
-- Trying `LoadFromCached("Banner", path)` / `LoadBanner(path)` from this screen caused the engine to close immediately after the load attempt.
+Deferred. The screen uses a static fallback banner. All known dynamic loading approaches produced a white rectangle. See attempts below.
 
 ## Confirmed Findings
 
@@ -18,52 +12,46 @@ Observed symptoms:
 
 The following were confirmed during debugging:
 
-- `song:GetBannerPath()` returned the expected `Butterfly.png` path.
+- `song:GetBannerPath()` returned the expected path (e.g. `make it better.png`).
 - `FILEMAN:DoesFileExist(...)` returned `true`.
-- `ActorUtil.ResolvePath(...)` returned the same valid `/Songs/...` path.
-- The actor reported a non-nil `RageTexture` at `418x164`.
+- The actor reported a non-nil `RageTexture` at the expected dimensions.
 
-So the issue is not:
+So the issue is not wrong song lookup, missing file, unresolved path, or missing texture object.
 
-- wrong song lookup
-- missing file
-- unresolved path
-- missing texture creation
+### ScreenQueueReady does not expose a built-in Banner actor
 
-### ScreenQueueReady does not expose a usable built-in Banner actor
+`SCREENMAN:GetTopScreen():GetChild("Banner")` returns `nil` on `ScreenQueueReady`. The normal `ScreenSelectMusic` proxy pattern cannot be reused here. `ScreenQueueReady` uses `Fallback="ScreenWithMenuElements"` (confirmed in metrics.ini), not a `ScreenSelectMusic` subclass.
 
-The normal ITG-mode banner on `ScreenSelectMusic` relies on proxying a screen-level `Banner` actor. Debugging showed `SCREENMAN:GetTopScreen():GetChild("Banner")` was `nil` on `ScreenQueueReady`, even after adding `Banner*` metrics. That means the normal SelectMusic proxy pattern cannot simply be reused here.
+### Theme assets render — song-folder assets do not
 
-### Theme assets render, song-folder assets do not render correctly
+Every method we tried to dynamically load a song-folder image produced a white rectangle. Loading a theme asset (e.g. `GetFallbackBanner()`) in the same actor renders correctly.
 
-Hardcoded test sprites on `ScreenQueueReady` showed:
+## Approaches Tried — All Produced White
 
-- a theme fallback banner PNG rendered correctly
-- hardcoded song-folder PNGs (`Butterfly.png`, `Butterfly-jacket.png`, `Butterfly-bg.png`) did not render correctly
+| Method | Actor type | Result |
+|--------|-----------|--------|
+| `sprite:Load(song:GetBannerPath())` | `Def.Sprite` | white |
+| `sprite:LoadBanner(path)` | `Def.Sprite` | white |
+| `sprite:LoadFromCached("Jacket", path)` | `Def.Sprite` | white |
+| `sprite:LoadFromCached("Banner", path)` | `Def.Sprite` | white |
+| `sprite:LoadFromCachedBanner(path)` | `Def.Sprite` | white, tex reported 512x512 |
+| `banner:LoadFromSong(song)` | `Def.Banner` | white (correct size after `setsize`) |
+| `banner:LoadFromSong(song):animate(true)` | `Def.Banner` | white |
+| Copy file via `RageFileUtil` to `Save/`, then `sprite:Load("Save/_server_banner.png")` | `Def.Sprite` | white |
+| HTTP fetch → `FILEMAN:SetFileContents` → `sprite:Load(cached_path)` | `Def.Sprite` | abandoned (complexity, `fetch_banner_from_url` scoping bug) |
 
-This narrows the issue to how song-folder images are being loaded/rendered on this screen, not to generic visibility, layering, or actor placement.
+### Note on `LoadFromSong` vs ScreenEvaluation
 
-## Working Reference
+`Def.Banner:LoadFromSong(song)` works on `ScreenEvaluation` (also a `ScreenWithMenuElements` screen). The difference: on ScreenEvaluation the song was just played, so its banner is already in the `BANNERCACHE` atlas. On `ScreenQueueReady` the song is freshly set and its banner is not in cache. The BANNERCACHE appears not to process its decode queue on this screen, so the atlas slot stays white indefinitely.
 
-The best known-good song-art loader in this fork is the Casual song tile implementation:
+`BANNERCACHE` has no Lua bindings — `Finish()` or `Demand()` cannot be called from theme code.
 
-- `BGAnimations/ScreenSelectMusicCasual overlay/SongMT.lua`
+### Note on `ScreenSelectMusicCasual`
 
-That code:
-
-- chooses jacket, then background, then banner
-- uses a plain `Def.Sprite`
-- prefers `LoadFromCached(type, path)` when available
-- falls back to `LoadBanner(path)` for older engine behavior
+`SongMT.lua` uses `Sprite:LoadFromCached(type, path)` and is confirmed to use `Fallback="ScreenWithMenuElements"`. We did not get to fully test whether `LoadFromCached` also produces white on a fresh (never-played) song on that screen; it may also rely on songs already being in cache from the music wheel's init pass.
 
 ## Recommended Direction
 
-Do not continue brute-forcing `ScreenQueueReady` with direct `Load()` / `Def.Banner` permutations.
+The most promising untried approach is to trigger a screen transition that causes the engine to populate the BANNERCACHE — for example, briefly pushing ScreenSelectMusic with the song pre-selected so the engine loads the banner into cache, then immediately transitioning to ScreenQueueReady. This is invasive to the UX and was not pursued.
 
-Instead:
-
-1. Extract a small reusable song-art loader based on `ScreenSelectMusicCasual overlay/SongMT.lua`.
-2. Use a hidden loader actor that follows the known-good Casual flow.
-3. Copy or proxy the loaded texture into the visible Server prep-screen art slot.
-
-This keeps the Server screen aligned with an already-working song-art path in the theme instead of relying on behavior that appears screen-specific and unstable.
+Alternatively, if the server API is extended to return a song ID, the banner could be fetched directly from the server's library browse endpoint (`/api/library/browse/songs/{id}/banner`) and written to a `Save/` path, then loaded from there. This was partially implemented but abandoned due to complexity before confirming whether `Save/`-path images render (the RageFile copy approach wrote to `Save/` and loaded from there — and also produced white, suggesting the white is not path-specific but something deeper in the texture pipeline on this screen).

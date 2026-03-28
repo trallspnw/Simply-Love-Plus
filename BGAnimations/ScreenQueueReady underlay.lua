@@ -382,19 +382,6 @@ local transition_to = function(screen_name)
 	top_screen:StartTransitioningScreen("SM_GoToNextScreen")
 end
 
-local update_banner = function(sprite)
-	local song = GAMESTATE:GetCurrentSong()
-	if not song or PREFSMAN:GetPreference("ShowBanners") == false or not song:HasBanner() then
-		sprite:visible(false)
-		return false
-	end
-
-	sprite:visible(true)
-	sprite:Load(song:GetBannerPath())
-	sprite:scaletoclipped(banner_width, banner_height)
-	return true
-end
-
 local update_song_detail_strip = function(frame)
 	local song = GAMESTATE:GetCurrentSong()
 	local values = frame:GetChild("Values")
@@ -449,7 +436,7 @@ local update_view = function(frame)
 
 	if is_loading then
 		if state_title then state_title:settext(THEME:GetString("ScreenQueueReady", "LoadingTitle")) end
-		if state_detail then state_detail:settext(THEME:GetString("ScreenQueueReady", "LoadingPrompt")) end
+		if state_detail then state_detail:settext("") end
 		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "LoadingFooter")) end
 		return
 	end
@@ -471,9 +458,6 @@ local update_view = function(frame)
 	local user_text = loaded_content and loaded_content:GetChild("UsernameText")
 	local song_text = loaded_content and loaded_content:GetChild("SongText")
 	local artist_text = loaded_content and loaded_content:GetChild("ArtistText")
-	local error_text = loaded_content and loaded_content:GetChild("ErrorText")
-	local banner_fallback = loaded_content and loaded_content:GetChild("ServerBannerFallback")
-	local banner_sprite = loaded_content and loaded_content:GetChild("ServerBanner")
 	local detail_strip = loaded_content and loaded_content:GetChild("SongDetailStrip")
 
 	local subtitle = target_song:GetDisplaySubTitle() or ""
@@ -482,17 +466,9 @@ local update_view = function(frame)
 		title = title .. "\n" .. subtitle
 	end
 
-	error_text:settext("")
-	user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer"))
-	song_text:settext(title)
-	artist_text:settext(target_song:GetDisplayArtist() or "")
-	local has_banner = false
-	if banner_sprite then
-		has_banner = update_banner(banner_sprite)
-	end
-	if banner_fallback then
-		banner_fallback:visible(not has_banner)
-	end
+	if user_text then user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer")) end
+	if song_text then song_text:settext(title) end
+	if artist_text then artist_text:settext(target_song:GetDisplayArtist() or "") end
 	if detail_strip then
 		update_song_detail_strip(detail_strip)
 	end
@@ -654,6 +630,7 @@ local t = Def.ActorFrame{
 	Def.ActorFrame{
 		Name="LoadedContent",
 		Def.ActorFrame{
+			Name="BannerFrame",
 			InitCommand=function(self)
 				if IsUsingWideScreen() then
 					self:zoom(0.7655):xy(_screen.cx - 170, 96)
@@ -663,15 +640,7 @@ local t = Def.ActorFrame{
 			end,
 
 			Def.Sprite{
-				Name="ServerBannerFallback",
 				Texture=GetFallbackBanner(),
-				InitCommand=function(self)
-					self:setsize(banner_width, banner_height)
-				end
-			},
-
-			Def.Sprite{
-				Name="ServerBanner",
 				InitCommand=function(self)
 					self:setsize(banner_width, banner_height)
 				end
@@ -768,13 +737,6 @@ local t = Def.ActorFrame{
 			Name="ArtistText",
 			InitCommand=function(self)
 				self:xy(_screen.cx + 70, _screen.cy + 132):zoom(1.35):horizalign(0):maxwidth(500):diffuse(color("#cccccc"))
-			end
-		},
-
-		LoadFont("Common Normal")..{
-			Name="ErrorText",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 108):zoom(0.65):maxwidth(900):diffuse(color("#ff6666"))
 			end
 		},
 
