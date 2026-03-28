@@ -60,14 +60,49 @@ local normalize = function(path)
 	return (path or ""):gsub("\\", "/"):gsub("^/*", ""):gsub("/*$", ""):lower()
 end
 
+local strip_group_variant = function(path)
+	local normalized = normalize(path)
+	local prefix = ""
+
+	if normalized:sub(1, 6) == "songs/" then
+		prefix = "songs/"
+		normalized = normalized:sub(#prefix + 1)
+	end
+
+	local slash = normalized:find("/", 1, true)
+	local group = slash and normalized:sub(1, slash - 1) or normalized
+	local rest = slash and normalized:sub(slash + 1) or ""
+
+	group = group:gsub("%s+%b[]$", "")
+
+	if rest ~= "" then
+		return prefix .. group .. "/" .. rest
+	end
+
+	return prefix .. group
+end
+
 local find_target_song = function(song_dir)
 	local songs = SONGMAN:GetAllSongs() or {}
 	local target_dir = normalize(song_dir)
 	if target_dir == "" then return nil end
 
+	local candidate_dirs = {
+		[target_dir] = true,
+		[strip_group_variant(target_dir)] = true,
+	}
+
+	if target_dir:sub(1, 6) == "songs/" then
+		candidate_dirs[target_dir:gsub("^songs/", "", 1)] = true
+		candidate_dirs[strip_group_variant(target_dir:gsub("^songs/", "", 1))] = true
+	else
+		candidate_dirs["songs/" .. target_dir] = true
+		candidate_dirs[strip_group_variant("songs/" .. target_dir)] = true
+	end
+
 	for song in ivalues(songs) do
 		local dir = normalize(song:GetSongDir())
-		if dir == target_dir then
+		if candidate_dirs[dir] or candidate_dirs[strip_group_variant(dir)] then
 			return song
 		end
 	end
