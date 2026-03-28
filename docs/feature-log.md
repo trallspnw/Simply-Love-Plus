@@ -11,6 +11,24 @@ Tracks fork-specific features and improvements added beyond upstream Simply Love
 
 ## Entries
 
+### 2026-03-28
+- Feature: Queue media planning note
+- Area: `docs/server-queue-media-plan.md`, `KNOWLEDGE_INDEX.md`
+- Summary: Recorded banner-art and preview-audio support as planned queue features that still require more implementation research.
+- Notes: Banner art remains blocked by existing queue-screen rendering issues, while preview audio is still earlier in the investigation stage.
+
+### 2026-03-28
+- Feature: Machine API chart-selection update
+- Area: `docs/game-api-contract.md`, `docs/server-queue-flow-plan.md`
+- Summary: Updated the queue integration docs so `start` and `finish` carry explicit `difficulty_name`, and `start` returns pre-play high score context for PR messaging.
+- Notes: This removes the earlier chart-identity ambiguity around manual difficulty changes before play or on retry.
+
+### 2026-03-28
+- Feature: Server queue flow plan
+- Area: `docs/server-queue-flow-plan.md`, `KNOWLEDGE_INDEX.md`
+- Summary: Captured the intended polling, queue-state, start/skip/finish, and high-score behavior for the server-driven queue flow before implementation.
+- Notes: The plan treats `queue_item_id` as the primary queue-head identity and leaves a short list of unresolved behavior decisions to confirm before coding.
+
 ### 2026-03-12
 - Feature: Server mode song-art debugging notes
 - Area: `docs/server-mode-song-art-debugging.md`, `KNOWLEDGE_INDEX.md`
