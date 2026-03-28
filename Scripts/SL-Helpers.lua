@@ -363,6 +363,7 @@ SetGameModePreferences = function()
 	-- this was probably a Bad Decision™ on my part in hindsight  -quietly
 	prefix["ITG"] = ""
 	prefix["Server"] = ""
+	prefix["Server2"] = ""
 	prefix["Queue"] = ""
 
 	prefix["Casual"] = "Casual-"
@@ -370,6 +371,12 @@ SetGameModePreferences = function()
 	if PROFILEMAN:GetStatsPrefix() ~= prefix[SL.Global.GameMode] then
 		PROFILEMAN:SetStatsPrefix(prefix[SL.Global.GameMode])
 	end
+end
+
+-- -----------------------------------------------------------------------
+IsITGLikeGameMode = function(mode)
+	local gm = mode or SL.Global.GameMode
+	return gm == "ITG" or gm == "Server" or gm == "Server2" or gm == "Queue"
 end
 
 -- -----------------------------------------------------------------------
@@ -590,7 +597,7 @@ IsW0Judgment = function(params, player)
 	if params.HoldNoteScore then return false end
 
 	-- Only check/update FA+ count if we received a TNS in the top window.
-	if params.TapNoteScore == "TapNoteScore_W1" and SL.Global.GameMode == "ITG" then
+	if params.TapNoteScore == "TapNoteScore_W1" and IsITGLikeGameMode() then
 		local prefs = SL.Preferences["FA+"]
 		local scale = PREFSMAN:GetPreference("TimingWindowScale")
 		local W0 = prefs["TimingWindowSecondsW1"] * scale + prefs["TimingWindowAdd"]
@@ -639,7 +646,7 @@ GetExJudgmentCounts = function(player)
 
 	local TNS = { "W1", "W2", "W3", "W4", "W5", "Miss" }
 
-    if SL.Global.GameMode == "ITG" then
+    if IsITGLikeGameMode() then
 		for window in ivalues(TNS) do
 			-- Get the count.
 			local number = stats:GetTapNoteScores( "TapNoteScore_"..window )

@@ -289,7 +289,7 @@ IsServiceAllowed = function(condition)
 		ThemePrefs.Get("EnableGrooveStats") and
 		SL.GrooveStats.IsConnected and
 		GAMESTATE:GetCurrentGame():GetName()=="dance" and
-		SL.Global.GameMode == "ITG" and
+		IsITGLikeGameMode() and
 		(SL.P1.ApiKey ~= "" or SL.P2.ApiKey ~= ""))
 end
 
@@ -325,7 +325,7 @@ ValidForGrooveStats = function(player)
 	-- FA+ is okay because it just halves ITG's TimingWindowW1 but keeps everything else the same.
 	-- Casual (and Experimental, Demonic, etc.) uses different settings
 	-- that are incompatible with GrooveStats ranking.
-	valid[4] = SL.Global.GameMode == "ITG"
+	valid[4] = IsITGLikeGameMode()
 
 	-- ------------------------------------------
 	-- Next, check global Preferences that would invalidate the score.
@@ -404,7 +404,7 @@ ValidForGrooveStats = function(player)
 
 	-- And then verify the windows themselves.
 	local TWA = PREFSMAN:GetPreference("TimingWindowAdd")
-	if SL.Global.GameMode == "ITG" then
+	if IsITGLikeGameMode() then
 		for i, window in ipairs(TimingWindows) do
 			-- Only check if the Timing Window is actually "enabled".
 			if i > 5 or SL[pn].ActiveModifiers.TimingWindows[i] then
@@ -456,7 +456,7 @@ ValidForGrooveStats = function(player)
 
 	local minTNSToScoreNores = ToEnumShortString(PREFSMAN:GetPreference("MinTNSToScoreNotes"))
 
-	if SL.Global.GameMode == "ITG" then
+	if IsITGLikeGameMode() then
 		-- The cut off for rehits is only allowed to be set to Greats (W3) or worse.
 		-- Anything else is not allowed for GrooveStats submission.
 		-- "invalid" options (like HitMine or something), resolve to TNS_None.
@@ -514,7 +514,7 @@ CreateCommentString = function(player)
 
 	local timingWindowOption = ""
 
-	if SL.Global.GameMode == "ITG" then
+	if IsITGLikeGameMode() then
 		if not SL[pn].ActiveModifiers.TimingWindows[4] and not SL[pn].ActiveModifiers.TimingWindows[5] then
 			timingWindowOption = "No Dec/WO"
 		elseif not SL[pn].ActiveModifiers.TimingWindows[5] then

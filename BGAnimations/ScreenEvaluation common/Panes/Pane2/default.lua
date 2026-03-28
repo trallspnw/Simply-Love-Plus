@@ -6,7 +6,7 @@ local pn = ToEnumShortString(player)
 
 -- We only want to use this in ITG mode.
 -- We don't want this version in casual mode at all.
-if SL.Global.GameMode ~= "ITG" or not SL[pn].ActiveModifiers.ShowFaPlusPane then
+if not IsITGLikeGameMode() or not SL[pn].ActiveModifiers.ShowFaPlusPane then
 	return
 end
 
