@@ -51,6 +51,10 @@ SelectMusicOrCourse = function()
 			return "ScreenQueueReady"
 		end
 
+		if SL.Global.GameMode == "Server2" then
+			return "ScreenServer2Load"
+		end
+
 		if SL.Global.GameMode == "Casual" then
 			return "ScreenSelectMusicCasual"
 		end
