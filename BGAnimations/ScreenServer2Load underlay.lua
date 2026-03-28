@@ -161,6 +161,7 @@ fetch_server_song = function(actor)
 	state = "loading"
 	error_detail = ""
 	request_started_at = GetTimeSinceStart()
+	SL.Global.ServerQueueItemId = nil
 
 	if request then
 		request:Cancel()
@@ -200,6 +201,8 @@ fetch_server_song = function(actor)
 				set_error(THEME:GetString("ScreenServer2Load", "NoQueuedSong"))
 				return
 			end
+
+			SL.Global.ServerQueueItemId = body.queue_item_id
 
 			local song = find_target_song(body.song.file_path)
 			if not song then

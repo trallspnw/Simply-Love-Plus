@@ -147,6 +147,7 @@ local GlobalDefaults = {
 			self.SampleMusicLoops = ThemePrefs.Get("SampleMusicLoops")
 			self.ServerModeActive = false
 			self.StepManiaServer = StepManiaServerConfig and StepManiaServerConfig.Get() or { Url = "", Token = "" }
+			self.ServerQueueItemId = nil
 
 			self.GameplayReloadCheck = false
 			-- How long to wait before displaying a "cue"

@@ -273,6 +273,7 @@ local request_queue_song = function(frame, show_loading)
 	queued_song_path = ""
 	queued_difficulty_name = ""
 	queued_player_name = ""
+	SL.Global.ServerQueueItemId = nil
 
 	if show_loading then
 		set_queue_loading()
@@ -327,6 +328,7 @@ local request_queue_song = function(frame, show_loading)
 				return
 			end
 
+			SL.Global.ServerQueueItemId = body.queue_item_id
 			queued_song_path = body.song.file_path or ""
 			queued_difficulty_name = body.song.difficulty_name or ""
 			queued_player_name = get_player_name(body.player)

@@ -380,6 +380,17 @@ IsITGLikeGameMode = function(mode)
 end
 
 -- -----------------------------------------------------------------------
+BuildStepManiaServerSongRequestBody = function(body)
+	local payload = body or {}
+
+	if SL and SL.Global and SL.Global.ServerQueueItemId ~= nil then
+		payload.queue_item_id = SL.Global.ServerQueueItemId
+	end
+
+	return payload
+end
+
+-- -----------------------------------------------------------------------
 -- Call ResetPreferencesToStockSM5() to reset all the Preferences that SL silently
 -- manages for you back to their stock SM5 values.
 --

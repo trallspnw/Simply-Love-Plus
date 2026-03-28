@@ -1,3 +1,5 @@
+local server2_input
+
 local af = Def.ActorFrame{
 	-- GameplayReloadCheck is a kludgy global variable used in ScreenGameplay in.lua to check
 	-- if ScreenGameplay is being entered "properly" or being reloaded by a scripted mod-chart.
@@ -11,6 +13,42 @@ local af = Def.ActorFrame{
 		-- the preselected music rate.
 		local songOptions = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
 		songOptions:MusicRate(SL.Global.ActiveModifiers.MusicRate)
+	end,
+	OnCommand=function(self)
+		if SL.Global.GameMode ~= "Server2" then return end
+
+		local top = SCREENMAN:GetTopScreen()
+		if not top then return end
+
+		local wheel = top:GetMusicWheel()
+		if wheel then
+			wheel:visible(false):diffusealpha(0)
+		end
+
+		server2_input = function(event)
+			if not event or event.type == "InputEventType_Release" then return false end
+
+			local game_button = event.GameButton or ""
+			local menu_button = event.MenuButton or ""
+
+			if game_button == "MenuLeft" or game_button == "MenuRight" or game_button == "MenuUp" or game_button == "MenuDown"
+			or menu_button == "Left" or menu_button == "Right" or menu_button == "Up" or menu_button == "Down"
+			or game_button == "Select" then
+				return true
+			end
+
+			return false
+		end
+
+		top:AddInputCallback(server2_input)
+	end,
+	OffCommand=function(self)
+		if SL.Global.GameMode ~= "Server2" then return end
+
+		local top = SCREENMAN:GetTopScreen()
+		if top and type(server2_input) == "function" then
+			top:RemoveInputCallback(server2_input)
+		end
 	end,
 
 	PlayerProfileSetMessageCommand=function(self, params)
@@ -55,7 +93,7 @@ local af = Def.ActorFrame{
 	-- i.e. content in PerPlayer/Over needs to draw on top of content from PerPlayer/Under
 
 	-- make the MusicWheel appear to cascade down; this should draw underneath P2's PaneDisplay
-	LoadActor("./MusicWheelAnimation.lua"),
+	SL.Global.GameMode ~= "Server2" and LoadActor("./MusicWheelAnimation.lua") or Def.Actor{},
 
 	-- number of steps, jumps, holds, etc., and high scores associated with the current stepchart
 	LoadActor("./PaneDisplay.lua"),
@@ -73,7 +111,7 @@ local af = Def.ActorFrame{
 
 	-- ---------------------------------------------------
 	-- finally, load the overlay used for sorting the MusicWheel (and more), hidden by default
-	LoadActor("./SortMenu/default.lua"),
+	SL.Global.GameMode ~= "Server2" and LoadActor("./SortMenu/default.lua") or Def.Actor{},
 	-- a Test Input overlay can (maybe) be accessed from the SortMenu
 	LoadActor("./TestInput.lua"),
 
@@ -85,7 +123,7 @@ local af = Def.ActorFrame{
 	-- activated via "CodeEscapeFromEventMode" under [ScreenSelectMusic] in Metrics.ini
 	LoadActor("./EscapeFromEventMode.lua"),
 
-	LoadActor("./SongSearch/default.lua"),
+	SL.Global.GameMode ~= "Server2" and LoadActor("./SongSearch/default.lua") or Def.Actor{},
 }
 
 return af
