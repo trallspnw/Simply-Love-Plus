@@ -20,9 +20,10 @@ This is the durable context index for this fork. Keep this file lightweight and 
 | Project Structure | High-level map of theme folders and where to implement changes. | [docs/project-structure.md](./docs/project-structure.md) | 2026-03-09 |
 | Docs System | Rules for adding durable knowledge and keeping context lean. | [docs/README.md](./docs/README.md) | 2026-03-09 |
 | Fork Decisions Log | Ongoing record of fork-specific decisions and rationale. | [docs/change-log.md](./docs/change-log.md) | 2026-03-09 |
-| Feature Log | Chronological list of fork-only feature improvements versus upstream behavior. | [docs/feature-log.md](./docs/feature-log.md) | 2026-03-12 |
+| Feature Log | Chronological list of fork-only feature improvements versus upstream behavior. | [docs/feature-log.md](./docs/feature-log.md) | 2026-03-28 |
 | Theme Networking | Confirmed engine networking APIs available to theme Lua and how to apply them for queue mode. | [docs/theme-networking-capabilities.md](./docs/theme-networking-capabilities.md) | 2026-03-10 |
-| Game API Contract | Machine-facing `/api/game/*` auth, queue/current-song behavior, payloads, validation, and high score semantics. | [docs/game-api-contract.md](./docs/game-api-contract.md) | 2026-03-25 |
+| Game API Contract | Machine-facing `/api/game/*` auth, queue/current-song behavior, payloads, validation, and high score semantics. | [docs/game-api-contract.md](./docs/game-api-contract.md) | 2026-03-28 |
+| Server Queue Flow Plan | Planned queue polling, state transitions, start/skip/finish lifecycle, and score display behavior for the machine-driven flow. | [docs/server-queue-flow-plan.md](./docs/server-queue-flow-plan.md) | 2026-03-28 |
 | StepMania Server Config | Machine-level storage pattern for backend URL/token and runtime access points. | [docs/stepmania-server-config.md](./docs/stepmania-server-config.md) | 2026-03-12 |
 | Server Mode Song Art Debugging | Findings from debugging why song-folder art misrenders on `ScreenQueueReady` and the recommended reuse path. | [docs/server-mode-song-art-debugging.md](./docs/server-mode-song-art-debugging.md) | 2026-03-12 |
 

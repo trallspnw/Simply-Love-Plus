@@ -11,6 +11,12 @@ Tracks fork-specific features and improvements added beyond upstream Simply Love
 
 ## Entries
 
+### 2026-03-28
+- Feature: Server queue flow plan
+- Area: `docs/server-queue-flow-plan.md`, `KNOWLEDGE_INDEX.md`
+- Summary: Captured the intended polling, queue-state, start/skip/finish, and high-score behavior for the server-driven queue flow before implementation.
+- Notes: The plan treats `queue_item_id` as the primary queue-head identity and leaves a short list of unresolved behavior decisions to confirm before coding.
+
 ### 2026-03-12
 - Feature: Server mode song-art debugging notes
 - Area: `docs/server-mode-song-art-debugging.md`, `KNOWLEDGE_INDEX.md`

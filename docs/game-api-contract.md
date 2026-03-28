@@ -1,7 +1,7 @@
 # Game API Contract (Machine/Theme Client)
 
 ## Last Verified
-2026-03-25 (merged from server-side `machine-api.md` and prior contract notes)
+2026-03-28 (reconciled to latest machine API details)
 
 ## Auth
 - Header: `Authorization: Bearer {machine_token}`
@@ -22,7 +22,6 @@ The machine API works against the current queue/current-song state.
 
 Current behavior:
 - If a queue entry exists, the queue head is treated as the current song.
-- If no queue entry exists, the API falls back to legacy current-song settings.
 - `start` marks the current queue head as `playing`.
 - `skip` removes the current queue head and advances.
 - `finish` records play history, removes the current queue head, and advances.
@@ -48,6 +47,7 @@ Success with current song present:
 
 ```json
 {
+  "queue_item_id": 42,
   "song": {
     "file_path": "1Arc2008 - DDR X/Butterfly",
     "difficulty_name": "Hard"
@@ -69,9 +69,10 @@ Success with current song present:
 ```
 
 Response fields:
+- `queue_item_id`: The current queue entry id. Pass this back to `POST /api/game/song/start`, `POST /api/game/song/skip`, and `POST /api/game/song/finish`.
 - `song.file_path`: Relative song path used by the server, matching ingested `Song.filePath`.
-- `song.difficulty_name`: Selected chart difficulty name.
-- `player`: Active player for the current song, if known.
+- `song.difficulty_name`: The selected chart difficulty name.
+- `player`: The active player for the current song, if known.
 - `user_highscore`: Best recorded score for the current player on the current chart.
 - `server_highscore`: Best recorded score for any player on the current chart, including `held_by`.
 
@@ -84,14 +85,25 @@ Notes:
 
 Marks the current queue song as started.
 
-This route is idempotent for the current queue head. If the current entry is already `playing`, it still returns success.
+This route is idempotent for the current queue head. If the current entry is already playing, it still returns success.
 
-Success for queue-backed current song:
+Request body:
+
+```json
+{
+  "queue_item_id": 42
+}
+```
+
+Request field rules:
+- `queue_item_id`: Required positive integer. It must match the current queue head or the request fails with `400` and no state change occurs.
+
+Success:
 
 ```json
 {
   "ok": true,
-  "queued": true,
+  "queue_item_id": 42,
   "song": {
     "file_path": "1Arc2008 - DDR X/Butterfly",
     "difficulty_name": "Hard"
@@ -103,14 +115,21 @@ Success for queue-backed current song:
 }
 ```
 
-Success for legacy settings-backed current song:
+Errors:
+
+Invalid or mismatched `queue_item_id`:
 
 ```json
-{
-  "ok": true,
-  "queued": false
-}
+{ "error": "queue_item_id must be a positive integer" }
 ```
+
+or:
+
+```json
+{ "error": "queue_item_id does not match the current queue item" }
+```
+
+Status: `400`
 
 If no current song exists:
 
@@ -126,10 +145,20 @@ Skips the current song.
 
 Current behavior:
 - If a queue entry exists, it is removed and the queue advances.
-- If no queue entry exists but a legacy current song is set, that current-song setting is cleared.
 - No play history is recorded.
 
-Success for queue-backed skip:
+Request body:
+
+```json
+{
+  "queue_item_id": 42
+}
+```
+
+Request field rules:
+- `queue_item_id`: Required positive integer. It must match the current queue head or the request fails with `400` and no state change occurs.
+
+Success:
 
 ```json
 {
@@ -139,6 +168,7 @@ Success for queue-backed skip:
     "difficulty_name": "Hard"
   },
   "next_song": {
+    "queue_item_id": 43,
     "file_path": "1Arc2008 - DDR X/Paranoia",
     "difficulty_name": "Challenge"
   }
@@ -147,11 +177,21 @@ Success for queue-backed skip:
 
 `next_song` is `null` when the queue becomes empty.
 
-Success for legacy settings-backed skip:
+Errors:
+
+Invalid or mismatched `queue_item_id`:
 
 ```json
-{ "ok": true }
+{ "error": "queue_item_id must be a positive integer" }
 ```
+
+or:
+
+```json
+{ "error": "queue_item_id does not match the current queue item" }
+```
+
+Status: `400`
 
 If no current song exists:
 
@@ -160,11 +200,6 @@ If no current song exists:
 ```
 
 Status: `400`
-
-Legacy clear behavior:
-- `current_song_path`
-- `current_song_difficulty`
-- `current_player_id`
 
 ### `POST /api/game/song/finish`
 
@@ -175,7 +210,8 @@ Request body:
 ```json
 {
   "score": 100.00,
-  "grade": "AAA"
+  "grade": "AAA",
+  "queue_item_id": 42
 }
 ```
 
@@ -183,6 +219,7 @@ Optional test payload:
 
 ```json
 {
+  "queue_item_id": 42,
   "score": 75.23,
   "grade": "B",
   "test": true
@@ -193,12 +230,14 @@ Request field rules:
 - `score`: Required non-negative decimal value.
 - `grade`: Required non-empty string.
 - `test`: Optional boolean. When `true`, the resulting `PlayHistory` row is marked as test data.
+- `queue_item_id`: Required positive integer. It must match the current queue head or the request fails with `400` and no state change occurs.
 
 Success:
 
 ```json
 {
   "recorded": true,
+  "queue_item_id": 42,
   "user_highscore": {
     "score": 97.43,
     "grade": "AA"
@@ -209,19 +248,30 @@ Success:
     "held_by": "Alex"
   },
   "next_song": {
+    "queue_item_id": 43,
     "file_path": "1Arc2008 - DDR X/Paranoia",
     "difficulty_name": "Challenge"
   }
 }
 ```
 
-`next_song` is omitted when the route is operating on legacy current-song settings instead of a queue entry.
+If `queue_item_id` does not match the active queue head:
+
+```json
+{ "error": "queue_item_id does not match the current queue item" }
+```
+
+Status: `400`
 
 Validation errors:
+
+Invalid score:
 
 ```json
 { "error": "score must be a non-negative decimal value" }
 ```
+
+Invalid grade:
 
 ```json
 { "error": "grade must be a non-empty string" }
@@ -237,73 +287,44 @@ Missing current song:
 
 Status: `400`
 
-Incomplete legacy current-song context:
-
-```json
-{ "error": "Current song context is missing player or chart data" }
-```
-
-Status: `400`
-
 ## History And High Score Semantics
 
 Play history is stored in `PlayHistory`.
 
 Current behavior:
 - History is chart-specific via `chartId`.
-- A finish event stores `songId`, `chartId`, `userId`, `score`, `grade`, `isTest`, and `playedAt`.
+- A finish event stores:
+  - `songId`
+  - `chartId`
+  - `userId`
+  - `score`
+  - `grade`
+  - `isTest`
+  - `playedAt`
 - User highscores are the highest score for the same player on the same chart.
 - Server highscores are the highest score for any player on the same chart.
 - Ties are broken by earliest `playedAt`.
 
-## Admin-Side Dependencies And Test Surface
+## Admin Test Surface
 
-### `GET /api/admin/settings/current-song`
+The admin `Test` tab can call these machine routes directly.
 
-Returns:
-
-```json
-{
-  "songPath": "Pack Name/Song Title",
-  "difficulty": "Expert",
-  "playerId": "3"
-}
-```
-
-### `PUT /api/admin/settings/current-song`
-
-Sets all three current-song fields together.
-
-### `GET /api/admin/users/active`
-
-Returns active users:
-
-```json
-[
-  {
-    "id": "3",
-    "displayName": "Jordan"
-  }
-]
-```
-
-Admin test behavior:
-- The admin `Test` tab can call machine routes directly.
+Current behavior:
 - Token may be omitted intentionally to test unauthorized responses.
+- Admin-triggered `POST /start`, `POST /skip`, and `POST /finish` requests must include `queue_item_id`.
 - Admin-triggered finish requests are forced to `test: true`.
-- The admin `History` tab can clear test-only history rows.
+- Admin `History` tab can clear test-only history rows.
 
 ## Current Gaps
 
 Known limitations at the time of writing:
 - `grade` accepts any non-empty string; there is no canonical grade validation yet.
-- `GET /api/game/song/current` still supports a legacy settings fallback for non-queue flows.
 - `skip` does not write any history.
 - There is no separate machine heartbeat route; token `lastSeen` is updated opportunistically on authenticated machine requests.
 
 ## Current Client Assumptions
 - Single stable bearer-token auth scheme.
 - `current` returns JSON on success with stable top-level fields.
-- `start` is available and safe to call idempotently for the active queue head.
-- `skip` advances queue-backed state and clears legacy current-song state.
-- `finish` validates score and grade, records play history, updates highscores, and advances state.
+- `current.queue_item_id` is the canonical queue-head identity for detecting changes.
+- `start`, `skip`, and `finish` all require `queue_item_id`.
+- `finish` returns updated high score context that can be used immediately on the result screen.
