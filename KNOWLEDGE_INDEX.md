@@ -22,7 +22,7 @@ This is the durable context index for this fork. Keep this file lightweight and 
 | Fork Decisions Log | Ongoing record of fork-specific decisions and rationale. | [docs/change-log.md](./docs/change-log.md) | 2026-03-09 |
 | Feature Log | Chronological list of fork-only feature improvements versus upstream behavior. | [docs/feature-log.md](./docs/feature-log.md) | 2026-03-12 |
 | Theme Networking | Confirmed engine networking APIs available to theme Lua and how to apply them for queue mode. | [docs/theme-networking-capabilities.md](./docs/theme-networking-capabilities.md) | 2026-03-10 |
-| Game API Contract | Machine-facing `/api/game/*` auth, queue/current-song behavior, payloads, validation, and high score semantics. | [docs/game-api-contract.md](./docs/game-api-contract.md) | 2026-03-25 |
+| Game API Contract | Machine-facing `/api/game/*` auth, queue/current-song behavior, payloads, validation, and high score semantics. | [docs/game-api-contract.md](./docs/game-api-contract.md) | 2026-03-27 |
 | StepMania Server Config | Machine-level storage pattern for backend URL/token and runtime access points. | [docs/stepmania-server-config.md](./docs/stepmania-server-config.md) | 2026-03-12 |
 | Server Mode Song Art Debugging | Findings from debugging why song-folder art misrenders on `ScreenQueueReady` and the recommended reuse path. | [docs/server-mode-song-art-debugging.md](./docs/server-mode-song-art-debugging.md) | 2026-03-12 |
 
