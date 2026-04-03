@@ -1,31 +1,50 @@
-local QUEUE_ENDPOINT = "/api/game/song/current"
-
-local top_screen
-local target_song
-local available_steps = {}
-local selected_index = 1
-local queue_state = "loading"
-local queue_timeout_seconds = 10
-local queue_request_started_at = -1
-local queue_consecutive_failures = 0
-local queue_failure_threshold = 3
-local queue_poll_interval_seconds = 5
-local queue_next_poll_at = -1
-local queued_song_path = ""
-local queued_difficulty_name = ""
-local queued_player_name = ""
-local queue_error_title = ""
-local queue_error_detail = ""
-local is_loading = true
-local last_up_press = 0
-local last_down_press = 0
-local double_tap_window = 0.33
-local input
-local queue_request
-local apply_selected_chart
+local CURRENT_ENDPOINT = "/api/game/song/current"
+local START_ENDPOINT = "/api/game/song/start"
+local SKIP_ENDPOINT = "/api/game/song/skip"
 
 local banner_width = 418
 local banner_height = 164
+local queue_timeout_seconds = 10
+local queue_poll_interval_seconds = 5
+local queue_failure_threshold = 3
+
+local top_screen
+local current_request
+local current_request_started_at = -1
+local queue_next_poll_at = -1
+local queue_consecutive_failures = 0
+
+local queue_state = "loading"
+local queue_error_title = ""
+local queue_error_detail = ""
+local target_song
+local available_steps = {}
+local selected_index = 1
+local preview_song_dir = ""
+local current_queue_item_id = nil
+local queued_song_path = ""
+local queued_difficulty_name = ""
+local queued_player_name = ""
+local queued_user_highscore = nil
+local queued_server_highscore = nil
+local queued_chart_highscores = nil
+
+local modal_mode = nil
+local modal_title = ""
+local modal_detail = ""
+local modal_options = {}
+local modal_index = 1
+local pending_action = nil
+local input
+local last_diff_direction = nil
+local last_diff_press_at = -1
+local diff_double_press_window = 0.45
+local play_song_preview
+local stop_song_preview
+
+local normalize = function(text)
+	return tostring(text or ""):gsub("\\", "/"):gsub("^%s*(.-)%s*$", "%1"):gsub("^/*", ""):gsub("/*$", ""):lower()
+end
 
 local is_start_button = function(event)
 	local game_button = event and event.GameButton or ""
@@ -54,10 +73,6 @@ local is_back_button = function(event)
 		or button:find("escape", 1, true) ~= nil
 		or button == "esc"
 		or device_button:find("escape", 1, true) ~= nil
-end
-
-local normalize = function(path)
-	return (path or ""):gsub("\\", "/"):gsub("^/*", ""):gsub("/*$", ""):lower()
 end
 
 local strip_group_variant = function(path)
@@ -106,6 +121,7 @@ local find_target_song = function(song_dir)
 			return song
 		end
 	end
+
 	return nil
 end
 
@@ -132,13 +148,8 @@ local get_steps_for_current_style = function(song)
 end
 
 local find_step_index_for_difficulty = function(steps_list, difficulty_name)
-	local normalized_name = normalize(difficulty_name)
-	if normalized_name == "" then return nil end
-
 	for i, chart in ipairs(steps_list) do
-		local display_name = normalize(chart:GetDifficulty())
-		local meter_name = normalize(ToEnumShortString(chart:GetDifficulty()))
-		if display_name == normalized_name or meter_name == normalized_name then
+		if DoesStepManiaServerDifficultyMatch(chart, difficulty_name) then
 			return i
 		end
 	end
@@ -158,53 +169,43 @@ local get_player_name = function(player_data)
 	return player_data.display_name or player_data.username or player_data.name or ""
 end
 
-local set_queue_error = function(title, detail)
-	queue_state = "error"
-	queue_error_title = title or ""
-	queue_error_detail = detail or ""
-	is_loading = false
-	queue_next_poll_at = -1
-end
-
-local clear_queue_error = function()
-	queue_error_title = ""
-	queue_error_detail = ""
-end
-
-local set_queue_loading = function()
-	queue_state = "loading"
-	is_loading = true
-	clear_queue_error()
-end
-
-local set_queue_empty = function()
-	queue_state = "empty"
-	is_loading = false
-	clear_queue_error()
-end
-
-local set_queue_ready = function()
-	queue_state = "ready"
-	is_loading = false
-	clear_queue_error()
-	queue_next_poll_at = -1
-end
-
-local queue_has_loaded_song = function()
-	return queue_state == "ready"
-end
-
 local safe_json_decode = function(body)
 	if type(body) ~= "string" or body == "" then
 		return nil
 	end
 
 	local ok, decoded = pcall(JsonDecode, body)
-	if ok then
-		return decoded
+	return ok and decoded or nil
+end
+
+local build_server_request = function(endpoint, method, body, on_response)
+	local config = (SL.Global and SL.Global.StepManiaServer) or {}
+	local base_url = config.Url or ""
+	local token = config.Token or ""
+
+	if base_url == "" or token == "" then
+		return nil, THEME:GetString("ScreenQueueReady", "MissingConfig")
 	end
 
-	return nil
+	local headers = {
+		Authorization="Bearer " .. token,
+	}
+
+	local request_body = nil
+	if body ~= nil then
+		request_body = JsonEncode(body)
+		headers["Content-Type"] = "application/json"
+	end
+
+	return NETWORK:HttpRequest{
+		url=base_url .. endpoint,
+		method=method,
+		headers=headers,
+		body=request_body,
+		connectTimeout=queue_timeout_seconds,
+		transferTimeout=queue_timeout_seconds,
+		onResponse=on_response,
+	}, nil
 end
 
 local get_response_error_detail = function(response, body)
@@ -225,173 +226,289 @@ local get_response_error_detail = function(response, body)
 		return THEME:GetString("ScreenQueueReady", "RequestStatus"):format(response.statusCode)
 	end
 
-	if response and response.error then
-		return tostring(response.error)
-	end
-
 	return THEME:GetString("ScreenQueueReady", "RequestFailed")
+end
+
+local clear_queue_context = function()
+	if SOUND and SOUND.StopMusic then
+		pcall(function() SOUND:StopMusic() end)
+	end
+	target_song = nil
+	available_steps = {}
+	selected_index = 1
+	preview_song_dir = ""
+	current_queue_item_id = nil
+	queued_song_path = ""
+	queued_difficulty_name = ""
+	queued_player_name = ""
+	queued_user_highscore = nil
+	queued_server_highscore = nil
+	queued_chart_highscores = nil
+	SL.Global.ServerQueueItemId = nil
+	SL.Global.ServerQueueCurrent = nil
+	SL.Global.ServerQueueSelectedDifficultyName = ""
+end
+
+local clear_server_session_state = function()
+	clear_queue_context()
+	SL.Global.ServerQueueCurrent = nil
+	SL.Global.ServerQueuePrefetch = nil
+	SL.Global.ServerQueueStartBaseline = nil
+	SL.Global.ServerQueueFinishResult = nil
+end
+
+local set_queue_error = function(title, detail)
+	queue_state = "error"
+	queue_error_title = title or ""
+	queue_error_detail = detail or ""
+	queue_next_poll_at = -1
+	stop_song_preview()
+end
+
+local set_queue_loading = function()
+	queue_state = "loading"
+	queue_error_title = ""
+	queue_error_detail = ""
+	stop_song_preview()
+end
+
+local set_queue_empty = function()
+	queue_state = "empty"
+	queue_error_title = ""
+	queue_error_detail = ""
+	stop_song_preview()
+end
+
+local set_queue_ready = function()
+	queue_state = "ready"
+	queue_error_title = ""
+	queue_error_detail = ""
+	play_song_preview(target_song)
+end
+
+local queue_has_loaded_song = function()
+	return queue_state == "ready"
 end
 
 local schedule_queue_poll = function()
 	queue_next_poll_at = GetTimeSinceStart() + queue_poll_interval_seconds
 end
 
-local handle_queue_request_failure = function(frame, detail)
-	queue_consecutive_failures = queue_consecutive_failures + 1
-
-	if queue_consecutive_failures >= queue_failure_threshold then
-		set_queue_error(
-			THEME:GetString("ScreenQueueReady", "ConnectionError"),
-			detail
-		)
-		frame:playcommand("Refresh")
-		return
-	end
-
-	schedule_queue_poll()
-
-	if queue_state == "empty" then
-		-- Stay on the empty-queue message while polling in the background.
-	else
-		queue_state = "loading"
-		is_loading = true
-	end
-
-	frame:playcommand("Refresh")
+local get_selected_steps = function()
+	return available_steps[selected_index]
 end
 
-local request_queue_song = function(frame, show_loading)
-	if not frame then return end
-
-	local config = (SL.Global and SL.Global.StepManiaServer) or {}
-	local base_url = config.Url or ""
-	local token = config.Token or ""
-
-	target_song = nil
-	available_steps = {}
-	selected_index = 1
-	queued_song_path = ""
-	queued_difficulty_name = ""
-	queued_player_name = ""
-
-	if show_loading then
-		set_queue_loading()
-	end
-
-	queue_request_started_at = GetTimeSinceStart()
-	queue_next_poll_at = -1
-
-	if queue_request then
-		queue_request:Cancel()
-		queue_request = nil
-	end
-
-	if base_url == "" or token == "" then
-		set_queue_error(
-			THEME:GetString("ScreenQueueReady", "ConnectionError"),
-			THEME:GetString("ScreenQueueReady", "MissingConfig")
-		)
-		frame:playcommand("Refresh")
-		return
-	end
-
-	frame:playcommand("Refresh")
-
-	queue_request = NETWORK:HttpRequest{
-		url=base_url .. QUEUE_ENDPOINT,
-		method="GET",
-		headers={
-			Authorization="Bearer " .. token,
-		},
-		connectTimeout=queue_timeout_seconds,
-		transferTimeout=queue_timeout_seconds,
-		onResponse=function(response)
-			queue_request = nil
-			local body = safe_json_decode(response and response.body or "")
-
-			if not response or response.statusCode ~= 200 then
-				handle_queue_request_failure(frame, get_response_error_detail(response, body))
-				return
-			end
-
-			if type(body) ~= "table" then
-				handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "InvalidResponse"))
-				return
-			end
-
-			queue_consecutive_failures = 0
-			if type(body.song) ~= "table" or type(body.song.file_path) ~= "string" or body.song.file_path == "" then
-				set_queue_empty()
-				schedule_queue_poll()
-				frame:playcommand("Refresh")
-				return
-			end
-
-			queued_song_path = body.song.file_path or ""
-			queued_difficulty_name = body.song.difficulty_name or ""
-			queued_player_name = get_player_name(body.player)
-
-			target_song = find_target_song(queued_song_path)
-			if not target_song then
-				handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingSong"):format(queued_song_path))
-				frame:playcommand("Refresh")
-				return
-			end
-
-			available_steps = get_steps_for_current_style(target_song)
-			if #available_steps == 0 then
-				handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingChart"))
-				frame:playcommand("Refresh")
-				return
-			end
-
-			set_queue_ready()
-			selected_index = find_step_index_for_difficulty(available_steps, queued_difficulty_name) or 1
-			apply_selected_chart()
-			frame:playcommand("Refresh")
-		end,
-	}
+local get_selected_difficulty_name = function()
+	return GetStepManiaServerDifficultyNameForSteps(get_selected_steps())
 end
 
-apply_selected_chart = function()
-	if not target_song or #available_steps == 0 then return end
+local apply_selected_chart = function()
+	if not target_song then return end
 
-	local steps = available_steps[selected_index]
+	local steps = get_selected_steps()
 	if not steps then return end
 
 	GAMESTATE:SetCurrentSong(target_song)
-
 	for pn in ivalues(GAMESTATE:GetHumanPlayers()) do
 		GAMESTATE:SetCurrentSteps(pn, steps)
 		GAMESTATE:SetPreferredDifficulty(pn, steps:GetDifficulty())
 	end
+
+	SL.Global.ServerQueueSelectedDifficultyName = get_selected_difficulty_name()
 end
 
-local ensure_steps_available = function()
-	if target_song and #available_steps == 0 then
-		available_steps = get_steps_for_current_style(target_song)
+local get_song_preview_metadata = function(song)
+	if not song then return nil end
+
+	local music_path = nil
+	local start_seconds = 0
+	local length_seconds = 15
+
+	pcall(function() music_path = song:GetMusicPath() end)
+	pcall(function() start_seconds = song:GetSampleStart() or start_seconds end)
+	pcall(function() length_seconds = song:GetSampleLength() or length_seconds end)
+
+	if not music_path or music_path == "" then
+		return nil
+	end
+
+	if tonumber(length_seconds) == nil or length_seconds <= 0 then
+		length_seconds = 15
+	end
+
+	return {
+		path = music_path,
+		start = tonumber(start_seconds) or 0,
+		length = tonumber(length_seconds) or 15,
+	}
+end
+
+play_song_preview = function(song)
+	if not song then return end
+	local song_dir = normalize(song:GetSongDir())
+	if song_dir ~= "" and song_dir == preview_song_dir then
+		return
+	end
+
+	local preview = get_song_preview_metadata(song)
+	if not preview or not SOUND then
+		return
+	end
+
+	local ok = pcall(function()
+		if SOUND.PlayMusicPart then
+			SOUND:PlayMusicPart(preview.path, preview.start, preview.length, 0.15, 1.0, true)
+		elseif SOUND.PlayMusicPartOnce then
+			SOUND:PlayMusicPartOnce(preview.path, preview.start, preview.length, 0.15, 1.0)
+		elseif SOUND.PlayMusic then
+			SOUND:PlayMusic(preview.path)
+		end
+	end)
+
+	if ok then
+		preview_song_dir = song_dir
 	end
 end
 
-local transition_to = function(screen_name)
-	if not top_screen then return end
-	if type(input) == "function" then
-		top_screen:RemoveInputCallback(input)
+stop_song_preview = function()
+	preview_song_dir = ""
+	if SOUND and SOUND.StopMusic then
+		pcall(function() SOUND:StopMusic() end)
 	end
-	top_screen:SetNextScreenName(screen_name)
-	top_screen:StartTransitioningScreen("SM_GoToNextScreen")
 end
 
-local update_banner = function(sprite)
-	local song = GAMESTATE:GetCurrentSong()
-	if not song or PREFSMAN:GetPreference("ShowBanners") == false or not song:HasBanner() then
-		sprite:visible(false)
+local queue_context_from_body = function(body)
+	if type(body) ~= "table" then return nil end
+	if type(body.song) ~= "table" or type(body.song.file_path) ~= "string" or body.song.file_path == "" then
+		return {
+			queue_item_id = nil,
+			song = nil,
+			player_name = "",
+			user_highscore = nil,
+			server_highscore = nil,
+		}
+	end
+
+	return {
+		queue_item_id = tonumber(body.queue_item_id),
+		song = body.song,
+		player_name = get_player_name(body.player),
+		user_highscore = body.user_highscore,
+		server_highscore = body.server_highscore,
+	}
+end
+
+local close_modal = function()
+	modal_mode = nil
+	modal_title = ""
+	modal_detail = ""
+	modal_options = {}
+	modal_index = 1
+	pending_action = nil
+end
+
+local open_busy_modal = function(title, detail, action_name)
+	modal_mode = "busy"
+	modal_title = title or ""
+	modal_detail = detail or ""
+	modal_options = {}
+	modal_index = 1
+	pending_action = action_name
+end
+
+local open_back_menu = function()
+	modal_mode = "menu"
+	modal_title = THEME:GetString("ScreenQueueReady", "BackMenuTitle")
+	modal_detail = THEME:GetString("ScreenQueueReady", "BackMenuDetail")
+	modal_options = {
+		THEME:GetString("ScreenQueueReady", "MenuContinue"),
+		THEME:GetString("ScreenQueueReady", "MenuSkip"),
+		THEME:GetString("ScreenQueueReady", "MenuExit"),
+	}
+	modal_index = 1
+	pending_action = nil
+end
+
+local format_high_score = function(score_data)
+	if type(score_data) ~= "table" then
+		return THEME:GetString("ScreenQueueReady", "NoHighScore")
+	end
+
+	local score = tonumber(score_data.score)
+	local grade = tostring(score_data.grade or "")
+	if not score and grade == "" then
+		return THEME:GetString("ScreenQueueReady", "NoHighScore")
+	end
+
+	local parts = {}
+	if score then
+		parts[#parts+1] = ("%0.2f%%"):format(score)
+	end
+	if grade ~= "" then
+		parts[#parts+1] = grade
+	end
+
+	return table.concat(parts, "  ")
+end
+
+local format_machine_holder = function(score_data)
+	if type(score_data) ~= "table" or type(score_data.held_by) ~= "string" or score_data.held_by == "" then
+		return ""
+	end
+
+	return THEME:GetString("ScreenQueueReady", "MachineHolder"):format(score_data.held_by)
+end
+
+local update_highscores_for_selected_difficulty = function()
+	if type(queued_chart_highscores) ~= "table" then return end
+
+	local selected_name = NormalizeStepManiaServerDifficultyName(get_selected_difficulty_name())
+	for _, entry in ipairs(queued_chart_highscores) do
+		local entry_name = NormalizeStepManiaServerDifficultyName(tostring(entry.difficulty_name or ""))
+		if entry_name == selected_name then
+			queued_user_highscore = entry.user_highscore
+			queued_server_highscore = entry.server_highscore
+			return
+		end
+	end
+
+	queued_user_highscore = nil
+	queued_server_highscore = nil
+end
+
+local difficulty_note_for_selection = function()
+	local selected_name = normalize(get_selected_difficulty_name())
+	local queued_name = NormalizeStepManiaServerDifficultyName(queued_difficulty_name)
+
+	if selected_name ~= "" and queued_name ~= "" and selected_name ~= queued_name then
+		return ("Queued: %s  •  Selected: %s"):format(queued_difficulty_name, get_selected_difficulty_name())
+	end
+
+	return ""
+end
+
+local try_change_difficulty = function(direction)
+	if #available_steps <= 1 then return false end
+
+	local now = GetTimeSinceStart()
+	local same_direction = (last_diff_direction == direction)
+	local within_window = last_diff_press_at > 0 and (now - last_diff_press_at) <= diff_double_press_window
+
+	last_diff_direction = direction
+	last_diff_press_at = now
+
+	if not (same_direction and within_window) then
 		return false
 	end
 
-	sprite:visible(true)
-	sprite:Load(song:GetBannerPath())
-	sprite:scaletoclipped(banner_width, banner_height)
+	if direction == "up" then
+		selected_index = ((selected_index - 2) % #available_steps) + 1
+	else
+		selected_index = (selected_index % #available_steps) + 1
+	end
+
+	last_diff_direction = nil
+	last_diff_press_at = -1
 	return true
 end
 
@@ -438,16 +555,38 @@ local update_view = function(frame)
 	local state_title = state_overlay and state_overlay:GetChild("StateTitle")
 	local state_detail = state_overlay and state_overlay:GetChild("StateDetail")
 	local state_footer = state_overlay and state_overlay:GetChild("StateFooter")
+	local modal_overlay = frame:GetChild("ModalOverlay")
 
 	if loaded_content then
 		loaded_content:visible(queue_has_loaded_song())
 	end
 
 	if state_overlay then
-		state_overlay:visible(not queue_has_loaded_song())
+		state_overlay:visible(not queue_has_loaded_song() and modal_mode == nil)
 	end
 
-	if is_loading then
+	if modal_overlay then
+		modal_overlay:visible(modal_mode ~= nil)
+	end
+
+	if modal_mode ~= nil and modal_overlay then
+		modal_overlay:GetChild("ModalTitle"):settext(modal_title)
+		modal_overlay:GetChild("ModalDetail"):settext(modal_detail)
+		local options = modal_overlay:GetChild("Options")
+		if options then
+			for i = 1, 3 do
+				local option = options:GetChild("Option" .. i)
+				if option then
+					local text = modal_options[i] or ""
+					option:settext(text)
+					option:visible(text ~= "")
+					option:diffuse(i == modal_index and color("#ffffff") or color("#bbbbbb"))
+				end
+			end
+		end
+	end
+
+	if queue_state == "loading" then
 		if state_title then state_title:settext(THEME:GetString("ScreenQueueReady", "LoadingTitle")) end
 		if state_detail then state_detail:settext(THEME:GetString("ScreenQueueReady", "LoadingPrompt")) end
 		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "LoadingFooter")) end
@@ -461,7 +600,7 @@ local update_view = function(frame)
 		return
 	end
 
-	if queue_error_title ~= "" then
+	if queue_state == "error" then
 		if state_title then state_title:settext(queue_error_title) end
 		if state_detail then state_detail:settext(queue_error_detail) end
 		if state_footer then state_footer:settext(THEME:GetString("ScreenQueueReady", "ErrorFooter")) end
@@ -471,10 +610,13 @@ local update_view = function(frame)
 	local user_text = loaded_content and loaded_content:GetChild("UsernameText")
 	local song_text = loaded_content and loaded_content:GetChild("SongText")
 	local artist_text = loaded_content and loaded_content:GetChild("ArtistText")
-	local error_text = loaded_content and loaded_content:GetChild("ErrorText")
-	local banner_fallback = loaded_content and loaded_content:GetChild("ServerBannerFallback")
-	local banner_sprite = loaded_content and loaded_content:GetChild("ServerBanner")
 	local detail_strip = loaded_content and loaded_content:GetChild("SongDetailStrip")
+	local player_score_value = loaded_content and loaded_content:GetChild("PlayerScoreValue")
+	local machine_score_value = loaded_content and loaded_content:GetChild("MachineScoreValue")
+	local machine_holder = loaded_content and loaded_content:GetChild("MachineScoreHolder")
+	local score_note = loaded_content and loaded_content:GetChild("ScoreNoteText")
+
+	if not target_song then return end
 
 	local subtitle = target_song:GetDisplaySubTitle() or ""
 	local title = target_song:GetDisplayMainTitle() or ""
@@ -482,74 +624,343 @@ local update_view = function(frame)
 		title = title .. "\n" .. subtitle
 	end
 
-	error_text:settext("")
-	user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer"))
-	song_text:settext(title)
-	artist_text:settext(target_song:GetDisplayArtist() or "")
-	local has_banner = false
-	if banner_sprite then
-		has_banner = update_banner(banner_sprite)
+	if user_text then
+		user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer"))
 	end
-	if banner_fallback then
-		banner_fallback:visible(not has_banner)
+	if song_text then song_text:settext(title) end
+	if artist_text then artist_text:settext(target_song:GetDisplayArtist() or "") end
+	if detail_strip then update_song_detail_strip(detail_strip) end
+	if player_score_value then
+		player_score_value:settext(THEME:GetString("ScreenQueueReady", "PlayerScoreLabel") .. ": " .. format_high_score(queued_user_highscore))
 	end
-	if detail_strip then
-		update_song_detail_strip(detail_strip)
+	if machine_score_value then
+		machine_score_value:settext(THEME:GetString("ScreenQueueReady", "MachineScoreLabel") .. ": " .. format_high_score(queued_server_highscore))
+	end
+	if machine_holder then machine_holder:settext(format_machine_holder(queued_server_highscore)) end
+	if score_note then score_note:settext(difficulty_note_for_selection()) end
+end
+
+local transition_to = function(screen_name)
+	if not top_screen then return end
+	if type(input) == "function" then
+		top_screen:RemoveInputCallback(input)
+	end
+	top_screen:SetNextScreenName(screen_name)
+	top_screen:StartTransitioningScreen("SM_GoToNextScreen")
+end
+
+local process_current_body
+local request_current
+
+local handle_queue_request_failure = function(frame, detail)
+	queue_consecutive_failures = queue_consecutive_failures + 1
+
+	if queue_consecutive_failures >= queue_failure_threshold then
+		set_queue_error(THEME:GetString("ScreenQueueReady", "ConnectionError"), detail)
+		close_modal()
+		frame:playcommand("Refresh")
+		return
+	end
+
+	queue_state = (queue_state == "empty") and "empty" or "loading"
+	schedule_queue_poll()
+	frame:playcommand("Refresh")
+end
+
+process_current_body = function(frame, body, force_apply)
+	local context = queue_context_from_body(body)
+	if not context then
+		handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "InvalidResponse"))
+		return
+	end
+
+	queue_consecutive_failures = 0
+	SL.Global.ServerQueuePrefetch = body
+
+	if not context.song then
+		clear_queue_context()
+		set_queue_empty()
+		close_modal()
+		schedule_queue_poll()
+		frame:playcommand("Refresh")
+		return
+	end
+
+	local queue_item_id = context.queue_item_id
+	if not force_apply and current_queue_item_id ~= nil and queue_item_id == current_queue_item_id then
+		close_modal()
+		schedule_queue_poll()
+		frame:playcommand("Refresh")
+		return
+	end
+
+	local song = find_target_song(context.song.file_path)
+	if not song then
+		handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingSong"):format(context.song.file_path))
+		return
+	end
+
+	local steps_list = get_steps_for_current_style(song)
+	if #steps_list == 0 then
+		handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingChart"))
+		return
+	end
+
+	target_song = song
+	available_steps = steps_list
+	selected_index = find_step_index_for_difficulty(steps_list, context.song.difficulty_name or "") or 1
+	current_queue_item_id = queue_item_id
+	queued_song_path = context.song.file_path or ""
+	queued_difficulty_name = context.song.difficulty_name or ""
+	queued_player_name = context.player_name or ""
+	queued_user_highscore = context.user_highscore
+	queued_server_highscore = context.server_highscore
+	queued_chart_highscores = type(body.chart_highscores) == "table" and body.chart_highscores or nil
+	SL.Global.ServerQueueItemId = current_queue_item_id
+	SL.Global.ServerQueueCurrent = body
+	apply_selected_chart()
+	set_queue_ready()
+	close_modal()
+	schedule_queue_poll()
+	frame:playcommand("Refresh")
+end
+
+request_current = function(frame, show_loading, force_apply)
+	if not frame then return end
+
+	if show_loading then
+		set_queue_loading()
+		frame:playcommand("Refresh")
+	end
+
+	if current_request then
+		current_request:Cancel()
+		current_request = nil
+	end
+
+	local request, error_detail = build_server_request(CURRENT_ENDPOINT, "GET", nil, function(response)
+		current_request = nil
+		local body = safe_json_decode(response and response.body or "")
+
+		if not response or response.statusCode ~= 200 then
+			handle_queue_request_failure(frame, get_response_error_detail(response, body))
+			return
+		end
+
+		process_current_body(frame, body, force_apply)
+	end)
+
+	if not request then
+		set_queue_error(THEME:GetString("ScreenQueueReady", "ConnectionError"), error_detail)
+		frame:playcommand("Refresh")
+		return
+	end
+
+	current_request_started_at = GetTimeSinceStart()
+	queue_next_poll_at = -1
+	current_request = request
+end
+
+local action_error_to_screen = function(frame, detail)
+	set_queue_error(THEME:GetString("ScreenQueueReady", "ActionErrorTitle"), detail)
+	close_modal()
+	frame:playcommand("Refresh")
+end
+
+local request_start = function(frame)
+	local steps = get_selected_steps()
+	if not target_song or not steps then return end
+
+	pending_action = "start"
+
+	local request_body = BuildStepManiaServerSongRequestBody({
+		difficulty_name = get_selected_difficulty_name(),
+	})
+
+	local request, error_detail = build_server_request(START_ENDPOINT, "POST", request_body, function(response)
+		local body = safe_json_decode(response and response.body or "")
+
+		if not response or response.statusCode ~= 200 then
+			pending_action = nil
+			action_error_to_screen(frame, get_response_error_detail(response, body))
+			return
+		end
+
+		SL.Global.ServerQueueStartBaseline = {
+			difficulty_name = request_body.difficulty_name,
+			user_highscore = body and body.user_highscore or nil,
+			server_highscore = body and body.server_highscore or nil,
+		}
+		SL.Global.ServerQueueFinishResult = nil
+		SL.Global.ServerQueueSelectedDifficultyName = request_body.difficulty_name
+
+		local snd = frame:GetChild("start_sound")
+		if snd then snd:play() end
+
+		GAMESTATE:SetCurrentPlayMode("PlayMode_Regular")
+		local song_options = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
+		if song_options then
+			song_options:MusicRate(SL.Global.ActiveModifiers.MusicRate)
+		end
+
+		SL.Global.ServerModeActive = true
+		SL.Global.GameMode = "ITG"
+		pending_action = nil
+		close_modal()
+		transition_to("ScreenGameplay")
+	end)
+
+	if not request then
+		pending_action = nil
+		action_error_to_screen(frame, error_detail)
+	end
+end
+
+local request_skip = function(frame)
+	open_busy_modal(
+		THEME:GetString("ScreenQueueReady", "SkippingTitle"),
+		THEME:GetString("ScreenQueueReady", "SkippingDetail"),
+		"skip"
+	)
+	frame:playcommand("Refresh")
+
+	local request, error_detail = build_server_request(
+		SKIP_ENDPOINT,
+		"POST",
+		BuildStepManiaServerSongRequestBody({}),
+		function(response)
+			local body = safe_json_decode(response and response.body or "")
+
+			if not response or response.statusCode ~= 200 then
+				action_error_to_screen(frame, get_response_error_detail(response, body))
+				return
+			end
+
+			clear_queue_context()
+			request_current(frame, false, true)
+		end
+	)
+
+	if not request then
+		action_error_to_screen(frame, error_detail)
 	end
 end
 
 input = function(event)
 	if not event or event.type == "InputEventType_Release" then return false end
 
-	if event.GameButton == "MenuUp" then
-		if is_loading or queue_error_title ~= "" then return true end
-		local now = GetTimeSinceStart()
-		if #available_steps > 0 and (now - last_up_press) <= double_tap_window then
-			selected_index = ((selected_index - 2) % #available_steps) + 1
-			apply_selected_chart()
-			top_screen:GetChild("Underlay"):playcommand("Refresh")
-			local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
-			if snd then snd:play() end
-		end
-		last_up_press = now
+	if pending_action ~= nil then
 		return true
 	end
 
-	if event.GameButton == "MenuDown" then
-		if is_loading or queue_error_title ~= "" then return true end
-		local now = GetTimeSinceStart()
-		if #available_steps > 0 and (now - last_down_press) <= double_tap_window then
-			selected_index = (selected_index % #available_steps) + 1
-			apply_selected_chart()
-			top_screen:GetChild("Underlay"):playcommand("Refresh")
-			local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
-			if snd then snd:play() end
-		end
-		last_down_press = now
+	if modal_mode == "busy" then
 		return true
 	end
 
-	if is_start_button(event) then
-		if is_loading then
+	if modal_mode == "menu" then
+		if event.GameButton == "MenuUp" or event.GameButton == "MenuLeft" then
+			modal_index = ((modal_index - 2) % #modal_options) + 1
+			top_screen:GetChild("Underlay"):playcommand("Refresh")
+			local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
+			if snd then snd:play() end
 			return true
 		end
 
-		if queue_state == "empty" then
+		if event.GameButton == "MenuDown" or event.GameButton == "MenuRight" then
+			modal_index = (modal_index % #modal_options) + 1
+			top_screen:GetChild("Underlay"):playcommand("Refresh")
+			local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
+			if snd then snd:play() end
 			return true
 		end
 
-		if queue_error_title ~= "" then
-			local underlay = top_screen and top_screen:GetChild("Underlay")
-			if underlay then
-				local snd = underlay:GetChild("change_sound")
-				if snd then snd:play() end
-				request_queue_song(underlay, true)
+		if is_back_button(event) then
+			close_modal()
+			top_screen:GetChild("Underlay"):playcommand("Refresh")
+			return true
+		end
+
+		if is_start_button(event) then
+			if modal_index == 1 then
+				close_modal()
+				top_screen:GetChild("Underlay"):playcommand("Refresh")
+			elseif modal_index == 2 then
+				request_skip(top_screen:GetChild("Underlay"))
 			else
-				SCREENMAN:SystemMessage(THEME:GetString("ScreenQueueReady", "RequestFailed"))
+				SL.Global.ServerModeActive = false
+				clear_server_session_state()
+				close_modal()
+				transition_to("ScreenTitleMenu")
 			end
 			return true
 		end
 
+		return true
+	end
+
+	if queue_state == "error" then
+		if is_start_button(event) then
+			request_current(top_screen:GetChild("Underlay"), true, true)
+			return true
+		end
+
+		if is_back_button(event) then
+			SL.Global.ServerModeActive = false
+			clear_server_session_state()
+			transition_to("ScreenTitleMenu")
+			return true
+		end
+
+		return true
+	end
+
+	if queue_state == "empty" then
+		if is_back_button(event) then
+			SL.Global.ServerModeActive = false
+			clear_server_session_state()
+			transition_to("ScreenTitleMenu")
+			return true
+		end
+		return true
+	end
+
+	if queue_state == "loading" then
+		if is_back_button(event) then
+			SL.Global.ServerModeActive = false
+			clear_server_session_state()
+			transition_to("ScreenTitleMenu")
+			return true
+		end
+		return true
+	end
+
+	if event.GameButton == "MenuUp" and try_change_difficulty("up") then
+		apply_selected_chart()
+		update_highscores_for_selected_difficulty()
+		top_screen:GetChild("Underlay"):playcommand("Refresh")
+		local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
+		if snd then snd:play() end
+		return true
+	end
+
+	if event.GameButton == "MenuDown" and try_change_difficulty("down") then
+		apply_selected_chart()
+		update_highscores_for_selected_difficulty()
+		top_screen:GetChild("Underlay"):playcommand("Refresh")
+		local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
+		if snd then snd:play() end
+		return true
+	end
+
+	if is_back_button(event) then
+		open_back_menu()
+		top_screen:GetChild("Underlay"):playcommand("Refresh")
+		local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
+		if snd then snd:play() end
+		return true
+	end
+
+	if is_start_button(event) then
 		if GAMESTATE:GetNumSidesJoined() == 0 then
 			local joined = event.PlayerNumber and GAMESTATE:JoinInput(event.PlayerNumber)
 			if not joined then
@@ -557,33 +968,7 @@ input = function(event)
 			end
 		end
 
-		ensure_steps_available()
-
-		if target_song and #available_steps > 0 then
-			apply_selected_chart()
-			local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("start_sound")
-			if snd then snd:play() end
-			-- Match the stable gameplay transition path used by other custom select flows.
-			GAMESTATE:SetCurrentPlayMode("PlayMode_Regular")
-			local song_options = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
-			if song_options then
-				song_options:MusicRate(SL.Global.ActiveModifiers.MusicRate)
-			end
-			-- Server mode reuses ITG preferences/metrics while preserving its own mode key.
-			SL.Global.ServerModeActive = true
-			SL.Global.GameMode = "Server"
-			transition_to("ScreenGameplay")
-		else
-			SCREENMAN:SystemMessage("Server mode could not start (missing player or chart).")
-		end
-		return true
-	end
-
-	if is_back_button(event) then
-		local snd = top_screen:GetChild("Underlay") and top_screen:GetChild("Underlay"):GetChild("change_sound")
-		if snd then snd:play() end
-		SL.Global.ServerModeActive = false
-		transition_to("ScreenTitleMenu")
+		request_start(top_screen:GetChild("Underlay"))
 		return true
 	end
 
@@ -593,26 +978,11 @@ end
 local t = Def.ActorFrame{
 	OnCommand=function(self)
 		top_screen = SCREENMAN:GetTopScreen()
+		local continuing_server_flow = SL.Global.ServerModeActive
 		SL.Global.ServerModeActive = true
-		self:SetUpdateFunction(function(actor)
-			local now = GetTimeSinceStart()
-
-			if queue_request and (now - queue_request_started_at) >= queue_timeout_seconds then
-				queue_request:Cancel()
-				queue_request = nil
-				handle_queue_request_failure(
-					actor,
-					THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds)
-				)
-				return
-			end
-
-			if not queue_request and queue_next_poll_at > 0 and now >= queue_next_poll_at then
-				request_queue_song(actor, false)
-			end
-		end)
-		-- Keep Server mode in a valid playmode for gameplay startup.
+		SL.Global.GameMode = "Server"
 		GAMESTATE:SetCurrentPlayMode("PlayMode_Regular")
+
 		local song_options = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
 		if song_options then
 			song_options:MusicRate(SL.Global.ActiveModifiers.MusicRate)
@@ -622,27 +992,51 @@ local t = Def.ActorFrame{
 			GAMESTATE:JoinPlayer(PLAYER_1)
 		end
 
-		selected_index = 1
-		last_up_press = 0
-		last_down_press = 0
-
-		self:playcommand("Refresh")
-
 		if top_screen then
 			top_screen:AddInputCallback(input)
 		end
 
-		request_queue_song(self, true)
+		self:SetUpdateFunction(function(actor)
+			local now = GetTimeSinceStart()
+
+			if current_request and (now - current_request_started_at) >= queue_timeout_seconds then
+				current_request:Cancel()
+				current_request = nil
+				handle_queue_request_failure(actor, THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds))
+				return
+			end
+
+			if modal_mode ~= nil then
+				return
+			end
+
+			if queue_state ~= "error" and not current_request and queue_next_poll_at > 0 and now >= queue_next_poll_at then
+				request_current(actor, false, false)
+			end
+		end)
+
+		self:playcommand("Refresh")
+
+		if not continuing_server_flow then
+			SL.Global.ServerQueuePrefetch = nil
+		end
+
+		if type(SL.Global.ServerQueuePrefetch) == "table" then
+			process_current_body(self, SL.Global.ServerQueuePrefetch, true)
+		else
+			request_current(self, true, true)
+		end
 	end,
 
 	OffCommand=function(self)
-		if queue_request then
-			queue_request:Cancel()
-			queue_request = nil
+		if current_request then
+			current_request:Cancel()
+			current_request = nil
 		end
+		stop_song_preview()
 		self:SetUpdateFunction(nil)
 		queue_next_poll_at = -1
-		if top_screen then
+		if top_screen and type(input) == "function" then
 			top_screen:RemoveInputCallback(input)
 		end
 	end,
@@ -669,13 +1063,6 @@ local t = Def.ActorFrame{
 					self:setsize(banner_width, banner_height)
 				end
 			},
-
-			Def.Sprite{
-				Name="ServerBanner",
-				InitCommand=function(self)
-					self:setsize(banner_width, banner_height)
-				end
-			},
 		},
 
 		Def.ActorFrame{
@@ -688,9 +1075,7 @@ local t = Def.ActorFrame{
 				InitCommand=function(self)
 					self:setsize(IsUsingWideScreen() and 320 or 310, 50):diffuse(color("#1e282f"))
 					if ThemePrefs.Get("RainbowMode") then self:diffusealpha(0.9) end
-					if ThemePrefs.Get("VisualStyle") == "Technique" then
-						self:diffusealpha(0.5)
-					end
+					if ThemePrefs.Get("VisualStyle") == "Technique" then self:diffusealpha(0.5) end
 				end
 			},
 
@@ -730,66 +1115,89 @@ local t = Def.ActorFrame{
 			},
 		},
 
+		-- Right info panel
 		Def.Quad{
 			InitCommand=function(self)
-				self:Center():zoomto(620, 160):diffuse(color("#000000")):diffusealpha(0.65):y(-100)
-			end
-		},
-
-		Def.Quad{
-			Name="UsernameBox",
-			InitCommand=function(self)
-				self:xy(_screen.cx + 240, _screen.cy + 2):zoomto(360, 34):diffuse(color("#000000")):diffusealpha(0.45)
-			end
-		},
-
-		Def.Quad{
-			Name="SongArtistBox",
-			InitCommand=function(self)
-				self:xy(_screen.cx + 240, _screen.cy + 94):zoomto(360, 134):diffuse(color("#000000")):diffusealpha(0.45)
+				local w = IsUsingWideScreen() and 370 or 290
+				local cx = _screen.cx + (IsUsingWideScreen() and 235 or 185)
+				self:xy(cx, 138):zoomto(w, 206):diffuse(color("#000000")):diffusealpha(0.55)
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="UsernameText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + 70, _screen.cy + 2):zoom(1.75):horizalign(0):maxwidth(420)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 46)
+					:zoom(0.52):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 580 or 440)
+					:diffuse(color("#9ca3af"))
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="SongText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + 70, _screen.cy + 34):zoom(1.9):horizalign(0):vertalign(top):maxwidth(400)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 66)
+					:zoom(0.58):horizalign(0):vertalign(0)
+					:maxwidth(IsUsingWideScreen() and 580 or 440)
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="ArtistText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + 70, _screen.cy + 132):zoom(1.35):horizalign(0):maxwidth(500):diffuse(color("#cccccc"))
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 124)
+					:zoom(0.48):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 580 or 440)
+					:diffuse(color("#9ca3af"))
 			end
 		},
 
 		LoadFont("Common Normal")..{
-			Name="ErrorText",
+			Name="PlayerScoreValue",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 108):zoom(0.65):maxwidth(900):diffuse(color("#ff6666"))
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 152)
+					:zoom(0.48):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 580 or 440)
 			end
 		},
 
-		-- Reuse SelectMusic's existing widgets so Server mode shows the same
-		-- difficulty picker and chart stats UI.
-		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PaneDisplay.lua")),
+		LoadFont("Common Normal")..{
+			Name="MachineScoreValue",
+			InitCommand=function(self)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 178)
+					:zoom(0.48):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 580 or 440)
+			end
+		},
+
+		LoadFont("Common Normal")..{
+			Name="MachineScoreHolder",
+			InitCommand=function(self)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 202)
+					:zoom(0.40):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 640 or 500)
+					:diffuse(color("#cfcfcf"))
+			end
+		},
+
+		LoadFont("Common Normal")..{
+			Name="ScoreNoteText",
+			InitCommand=function(self)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 224)
+					:zoom(0.36):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 700 or 550)
+					:diffuse(color("#9ca3af"))
+			end
+		},
+
 		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PerPlayer/default.lua")),
 		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/StepsDisplayList/default.lua")),
 	},
 
 	Def.ActorFrame{
 		Name="StateOverlay",
-		InitCommand=function(self)
-			self:visible(false)
-		end,
+		InitCommand=function(self) self:visible(false) end,
 
 		Def.Quad{
 			InitCommand=function(self)
@@ -803,14 +1211,12 @@ local t = Def.ActorFrame{
 				self:xy(_screen.cx, _screen.cy - 44):zoom(0.85):maxwidth(700)
 			end
 		},
-
 		LoadFont("Common Normal")..{
 			Name="StateDetail",
 			InitCommand=function(self)
 				self:xy(_screen.cx, _screen.cy + 2):zoom(0.72):maxwidth(860):wrapwidthpixels(840)
 			end
 		},
-
 		LoadFont("Common Normal")..{
 			Name="StateFooter",
 			InitCommand=function(self)
@@ -818,9 +1224,53 @@ local t = Def.ActorFrame{
 			end
 		},
 	},
+
+	Def.ActorFrame{
+		Name="ModalOverlay",
+		InitCommand=function(self) self:visible(false) end,
+
+		Def.Quad{
+			InitCommand=function(self)
+				self:Center():zoomto(620, 230):diffuse(color("#000000")):diffusealpha(0.88)
+			end
+		},
+		LoadFont("Common Bold")..{
+			Name="ModalTitle",
+			InitCommand=function(self)
+				self:xy(_screen.cx, _screen.cy - 58):zoom(0.82):maxwidth(560)
+			end
+		},
+		LoadFont("Common Normal")..{
+			Name="ModalDetail",
+			InitCommand=function(self)
+				self:xy(_screen.cx, _screen.cy - 16):zoom(0.65):maxwidth(760):wrapwidthpixels(740):diffuse(color("#d0d0d0"))
+			end
+		},
+		Def.ActorFrame{
+			Name="Options",
+			LoadFont("Common Normal")..{
+				Name="Option1",
+				InitCommand=function(self)
+					self:xy(_screen.cx, _screen.cy + 38):zoom(0.82):maxwidth(400)
+				end
+			},
+			LoadFont("Common Normal")..{
+				Name="Option2",
+				InitCommand=function(self)
+					self:xy(_screen.cx, _screen.cy + 72):zoom(0.82):maxwidth(400)
+				end
+			},
+			LoadFont("Common Normal")..{
+				Name="Option3",
+				InitCommand=function(self)
+					self:xy(_screen.cx, _screen.cy + 106):zoom(0.82):maxwidth(400)
+				end
+			},
+		},
+	},
 }
 
-t[#t+1] = LoadActor( THEME:GetPathS("ScreenSelectMaster", "change") )..{ Name="change_sound", IsAction=true, SupportPan=false }
-t[#t+1] = LoadActor( THEME:GetPathS("common", "start") )..{ Name="start_sound", IsAction=true, SupportPan=false }
+t[#t+1] = LoadActor(THEME:GetPathS("ScreenSelectMaster", "change"))..{ Name="change_sound", IsAction=true, SupportPan=false }
+t[#t+1] = LoadActor(THEME:GetPathS("common", "start"))..{ Name="start_sound", IsAction=true, SupportPan=false }
 
 return t

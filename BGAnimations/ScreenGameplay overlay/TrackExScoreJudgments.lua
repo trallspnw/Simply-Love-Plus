@@ -78,7 +78,7 @@ return Def.Actor{
 		elseif params.TapNoteScore then
 			local TNS = ToEnumShortString(params.TapNoteScore)
 
-			if SL.Global.GameMode == "ITG" then
+			if IsITGLikeGameMode() then
 				if TNS == "W1" then
 					-- Check if this W1 is actually in the W0 window
 					local is_W0 = IsW0Judgment(params, player)

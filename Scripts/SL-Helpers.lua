@@ -213,6 +213,87 @@ GetComboThreshold = function( MaintainOrContinue )
 end
 
 -- -----------------------------------------------------------------------
+-- StepMania Server queue helpers
+
+local normalize_server_text = function(text)
+	return tostring(text or ""):gsub("^%s*(.-)%s*$", "%1")
+end
+
+NormalizeStepManiaServerDifficultyName = function(name)
+	local normalized = normalize_server_text(name):lower()
+
+	if normalized == "expert" then return "challenge" end
+	if normalized == "custom" then return "edit" end
+
+	return normalized
+end
+
+GetThemeDifficultyDisplayName = function(difficulty)
+	local short = normalize_server_text(difficulty)
+	if short:match("^Difficulty_") then
+		short = ToEnumShortString(short)
+	end
+
+	local ok, localized = pcall(function()
+		return THEME:GetString("Difficulty", short)
+	end)
+
+	if ok and localized and localized ~= "" then
+		return localized
+	end
+
+	return short
+end
+
+IsITGLikeGameMode = function()
+	return SL and SL.Global and (SL.Global.GameMode == "ITG" or SL.Global.GameMode == "Server")
+end
+
+DoesStepManiaServerDifficultyMatch = function(chart, difficulty_name)
+	if not chart then return false end
+
+	local target = NormalizeStepManiaServerDifficultyName(difficulty_name)
+	if target == "" then return false end
+
+	local enum_name = NormalizeStepManiaServerDifficultyName(chart:GetDifficulty())
+	local short_name = NormalizeStepManiaServerDifficultyName(ToEnumShortString(chart:GetDifficulty()))
+	local display_name = NormalizeStepManiaServerDifficultyName(GetThemeDifficultyDisplayName(chart:GetDifficulty()))
+
+	return target == enum_name or target == short_name or target == display_name
+end
+
+GetStepManiaServerDifficultyNameForSteps = function(steps)
+	if not steps then return "" end
+	return GetThemeDifficultyDisplayName(steps:GetDifficulty())
+end
+
+BuildStepManiaServerSongRequestBody = function(body)
+	local payload = body or {}
+	if SL and SL.Global and SL.Global.ServerQueueItemId ~= nil then
+		payload.queue_item_id = SL.Global.ServerQueueItemId
+	end
+	return payload
+end
+
+GetStepManiaServerScoreFromPercentDP = function(percent_dp)
+	local percent = (tonumber(percent_dp) or 0) * 100
+	return math.floor(percent * 100 + 0.5) / 100
+end
+
+GetStepManiaServerGradeString = function(grade)
+	local short = ToEnumShortString(grade or "Grade_None")
+	local ok, localized = pcall(function()
+		return THEME:GetString("Grade", short)
+	end)
+
+	if ok and localized and localized ~= "" then
+		return localized
+	end
+
+	return short
+end
+
+-- -----------------------------------------------------------------------
 
 -- FailType is a PlayerOption that can be set using SM5's PlayerOptions interface.
 -- If you wanted, you could set FailTyper per-player, prior to Gameplay like
@@ -590,7 +671,7 @@ IsW0Judgment = function(params, player)
 	if params.HoldNoteScore then return false end
 
 	-- Only check/update FA+ count if we received a TNS in the top window.
-	if params.TapNoteScore == "TapNoteScore_W1" and SL.Global.GameMode == "ITG" then
+	if params.TapNoteScore == "TapNoteScore_W1" and IsITGLikeGameMode() then
 		local prefs = SL.Preferences["FA+"]
 		local scale = PREFSMAN:GetPreference("TimingWindowScale")
 		local W0 = prefs["TimingWindowSecondsW1"] * scale + prefs["TimingWindowAdd"]
@@ -639,7 +720,7 @@ GetExJudgmentCounts = function(player)
 
 	local TNS = { "W1", "W2", "W3", "W4", "W5", "Miss" }
 
-    if SL.Global.GameMode == "ITG" then
+    if IsITGLikeGameMode() then
 		for window in ivalues(TNS) do
 			-- Get the count.
 			local number = stats:GetTapNoteScores( "TapNoteScore_"..window )
