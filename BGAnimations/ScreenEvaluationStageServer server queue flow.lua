@@ -21,7 +21,7 @@ local current_grade = GetStepManiaServerGradeString(player_stats:GetGrade())
 local current_difficulty_name = GetStepManiaServerDifficultyNameForSteps(current_steps)
 local failed = STATSMAN:GetCurStageStats():AllFailed()
 
-local finish_status = failed and "menu" or "submitting"
+local finish_status = failed and "failed" or "submitting"
 local finish_detail = ""
 local menu_index = 1
 local pre_play = SL.Global.ServerQueueStartBaseline or {}
@@ -195,12 +195,89 @@ local restore_engine_input = function()
 	end
 end
 
+local redirect_engine_input = function()
+	for player in ivalues(GAMESTATE:GetHumanPlayers()) do
+		SCREENMAN:set_input_redirected(player, true)
+	end
+end
+
 local transition_to_queue_ready = function()
 	if not top_screen then return end
 	restore_engine_input()
 	SL.Global.GameMode = "Server"
 	top_screen:SetNextScreenName("ScreenQueueReady")
 	top_screen:StartTransitioningScreen("SM_GoToNextScreen")
+end
+
+local get_eval_common_actor = function()
+	if not top_screen then return nil end
+	local overlay = top_screen:GetChild("Overlay")
+	if not overlay then return nil end
+	return overlay:GetChild("ScreenEval Common")
+end
+
+local get_eval_panes_actor = function()
+	local common = get_eval_common_actor()
+	if not common then return nil end
+	return common:GetChild("Panes")
+end
+
+local activate_fail_menu_input_mode = function()
+	local common = get_eval_common_actor()
+	if common then
+		common:playcommand("DirectInputToEventOverlayHandler")
+	end
+	redirect_engine_input()
+end
+
+local get_side_key_for_event = function(event)
+	local controller = tonumber(ToEnumShortString(event and event.controller))
+	if controller == 1 or controller == 2 then
+		return "P" .. controller
+	end
+	local pn = event and event.PlayerNumber
+	if pn == PLAYER_2 then return "P2" end
+	return "P1"
+end
+
+local find_visible_pane_index = function(panes_actor, side_key, max_panes)
+	for i = 1, max_panes do
+		local pane = panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key))
+		if pane and pane:GetVisible() then
+			return i
+		end
+	end
+	return nil
+end
+
+local switch_eval_pane = function(event, delta)
+	local panes_actor = get_eval_panes_actor()
+	if not panes_actor then return false end
+
+	local side_key = get_side_key_for_event(event)
+	local max_panes = 0
+	for i = 1, 12 do
+		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)) then
+			max_panes = i
+		end
+	end
+	if max_panes <= 1 then return false end
+
+	local active_index = find_visible_pane_index(panes_actor, side_key, max_panes) or 1
+	local other_side_key = (side_key == "P1") and "P2" or "P1"
+	local other_active_index = find_visible_pane_index(panes_actor, other_side_key, max_panes)
+
+	local next_index = ((active_index - 1 + delta) % max_panes) + 1
+	if #GAMESTATE:GetHumanPlayers() == 1 and other_active_index and next_index == other_active_index and max_panes > 1 then
+		next_index = ((next_index - 1 + delta) % max_panes) + 1
+	end
+
+	for i = 1, max_panes do
+		local pane = panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key))
+		if pane then pane:visible(i == next_index) end
+	end
+
+	return true
 end
 
 local request_current = function()
@@ -366,6 +443,29 @@ input = function(event)
 		return true
 	end
 
+	if finish_status == "failed" then
+		if event.GameButton == "MenuLeft" then
+			return switch_eval_pane(event, -1)
+		end
+
+		if event.GameButton == "MenuRight" then
+			return switch_eval_pane(event, 1)
+		end
+
+		if is_start_button(event) then
+			finish_status = "menu"
+			activate_fail_menu_input_mode()
+			if overlay_actor then overlay_actor:queuecommand("RefreshServerQueueFlow") end
+			return true
+		end
+
+		if is_back_button(event) then
+			return true
+		end
+
+		return true
+	end
+
 	if finish_status == "submitting" then
 		return true
 	end
@@ -406,10 +506,7 @@ local af = Def.ActorFrame{
 				top_screen:lockinput(0.6)
 			end
 		end
-		-- disable C++ engine input so our Lua callback has full control
-		for player in ivalues(GAMESTATE:GetHumanPlayers()) do
-			SCREENMAN:set_input_redirected(player, true)
-		end
+		redirect_engine_input()
 
 		self:SetUpdateFunction(function(actor)
 			local now = GetTimeSinceStart()
@@ -454,7 +551,7 @@ local af = Def.ActorFrame{
 		local show_menu = (finish_status == "menu")
 		if fail_menu then fail_menu:visible(show_menu) end
 		if results_panel then
-			results_panel:visible(finish_status == "submitting" or finish_status == "results")
+			results_panel:visible(not failed and (finish_status == "submitting" or finish_status == "results"))
 
 			local primary = results_panel:GetChild("PrimaryMessage")
 			local secondary = results_panel:GetChild("SecondaryMessage")
@@ -554,35 +651,27 @@ local af = Def.ActorFrame{
 
 		Def.Quad{
 			InitCommand=function(self)
-				self:xy(panel_x, panel_y)
-					:zoomto(panel_w, 122)
+				self:xy(_screen.cx, _screen.cy)
+					:zoomto(IsUsingWideScreen() and 260 or 220, 120)
 					:diffuse(color("#000000")):diffusealpha(0.84)
-			end
-		},
-		LoadFont("Common Bold")..{
-			Text=THEME:GetString("ScreenEvaluation", "ServerFailMenuTitle"),
-			InitCommand=function(self)
-				self:xy(panel_left, panel_top - 6)
-					:zoom(0.40):horizalign(0)
-					:maxwidth(panel_text_w)
 			end
 		},
 		LoadFont("Common Normal")..{
 			Text=THEME:GetString("ScreenEvaluation", "ServerForfeit"),
 			Name="Option1",
 			InitCommand=function(self)
-				self:xy(panel_left, panel_top + 28)
-					:zoom(0.42):horizalign(0)
-					:maxwidth(panel_text_w)
+				self:xy(_screen.cx, _screen.cy - 18)
+					:zoom(1.16)
+					:maxwidth(320)
 			end
 		},
 		LoadFont("Common Normal")..{
 			Text=THEME:GetString("ScreenEvaluation", "ServerRetry"),
 			Name="Option2",
 			InitCommand=function(self)
-				self:xy(panel_left, panel_top + 56)
-					:zoom(0.42):horizalign(0)
-					:maxwidth(panel_text_w)
+				self:xy(_screen.cx, _screen.cy + 20)
+					:zoom(1.16)
+					:maxwidth(320)
 			end
 		},
 	},
