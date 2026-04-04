@@ -435,20 +435,11 @@ local format_high_score = function(score_data)
 	end
 
 	local score = tonumber(score_data.score)
-	local grade = tostring(score_data.grade or "")
-	if not score and grade == "" then
+	if not score then
 		return THEME:GetString("ScreenQueueReady", "NoHighScore")
 	end
 
-	local parts = {}
-	if score then
-		parts[#parts+1] = ("%0.2f%%"):format(score)
-	end
-	if grade ~= "" then
-		parts[#parts+1] = grade
-	end
-
-	return table.concat(parts, "  ")
+	return ("%0.2f"):format(score)
 end
 
 local format_machine_holder = function(score_data)
@@ -631,10 +622,10 @@ local update_view = function(frame)
 	if artist_text then artist_text:settext(target_song:GetDisplayArtist() or "") end
 	if detail_strip then update_song_detail_strip(detail_strip) end
 	if player_score_value then
-		player_score_value:settext(THEME:GetString("ScreenQueueReady", "PlayerScoreLabel") .. ": " .. format_high_score(queued_user_highscore))
+		player_score_value:settext("Personal Record: " .. format_high_score(queued_user_highscore))
 	end
 	if machine_score_value then
-		machine_score_value:settext(THEME:GetString("ScreenQueueReady", "MachineScoreLabel") .. ": " .. format_high_score(queued_server_highscore))
+		machine_score_value:settext("Machine Record: " .. format_high_score(queued_server_highscore))
 	end
 	if machine_holder then machine_holder:settext(format_machine_holder(queued_server_highscore)) end
 	if score_note then score_note:settext(difficulty_note_for_selection()) end
@@ -1116,16 +1107,16 @@ local t = Def.ActorFrame{
 			InitCommand=function(self)
 				local w = IsUsingWideScreen() and 370 or 290
 				local cx = _screen.cx + (IsUsingWideScreen() and 235 or 185)
-				self:xy(cx, 138):zoomto(w, 206):diffuse(color("#000000")):diffusealpha(0.55)
+				self:xy(cx, 178):zoomto(w, 246):diffuse(color("#000000")):diffusealpha(0.55)
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="UsernameText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 46)
-					:zoom(0.52):horizalign(0)
-					:maxwidth(IsUsingWideScreen() and 580 or 440)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 86)
+					:zoom(1.04):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 290 or 220)
 					:diffuse(color("#9ca3af"))
 			end
 		},
@@ -1133,18 +1124,18 @@ local t = Def.ActorFrame{
 		LoadFont("Common Normal")..{
 			Name="SongText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 66)
-					:zoom(0.58):horizalign(0):vertalign(0)
-					:maxwidth(IsUsingWideScreen() and 580 or 440)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 114)
+					:zoom(1.16):horizalign(0):vertalign(0)
+					:maxwidth(IsUsingWideScreen() and 290 or 220)
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="ArtistText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 124)
-					:zoom(0.48):horizalign(0)
-					:maxwidth(IsUsingWideScreen() and 580 or 440)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 174)
+					:zoom(0.96):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 300 or 230)
 					:diffuse(color("#9ca3af"))
 			end
 		},
@@ -1152,27 +1143,27 @@ local t = Def.ActorFrame{
 		LoadFont("Common Normal")..{
 			Name="PlayerScoreValue",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 152)
-					:zoom(0.48):horizalign(0)
-					:maxwidth(IsUsingWideScreen() and 580 or 440)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 212)
+					:zoom(0.96):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 300 or 230)
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="MachineScoreValue",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 178)
-					:zoom(0.48):horizalign(0)
-					:maxwidth(IsUsingWideScreen() and 580 or 440)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 248)
+					:zoom(0.96):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 300 or 230)
 			end
 		},
 
 		LoadFont("Common Normal")..{
 			Name="MachineScoreHolder",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 202)
-					:zoom(0.40):horizalign(0)
-					:maxwidth(IsUsingWideScreen() and 640 or 500)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 282)
+					:zoom(0.80):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 320 or 250)
 					:diffuse(color("#cfcfcf"))
 			end
 		},
@@ -1180,9 +1171,9 @@ local t = Def.ActorFrame{
 		LoadFont("Common Normal")..{
 			Name="ScoreNoteText",
 			InitCommand=function(self)
-				self:xy(_screen.cx + (IsUsingWideScreen() and 52 or 42), 224)
-					:zoom(0.36):horizalign(0)
-					:maxwidth(IsUsingWideScreen() and 700 or 550)
+				self:xy(_screen.cx + (IsUsingWideScreen() and 62 or 52), 314)
+					:zoom(0.72):horizalign(0)
+					:maxwidth(IsUsingWideScreen() and 360 or 280)
 					:diffuse(color("#9ca3af"))
 			end
 		},
