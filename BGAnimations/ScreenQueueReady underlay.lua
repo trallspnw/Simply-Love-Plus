@@ -7,6 +7,7 @@ local banner_height = 164
 local queue_timeout_seconds = 10
 local queue_poll_interval_seconds = 5
 local queue_failure_threshold = 3
+local queue_preview_start_delay_seconds = 0.35
 
 local top_screen
 local current_request
@@ -21,6 +22,8 @@ local target_song
 local available_chart_options = {}
 local selected_index = 1
 local preview_song_dir = ""
+local next_preview_attempt_at = -1
+local preview_retry_interval_seconds = 0.35
 local current_queue_item_id = nil
 local current_chart_id = nil
 local queued_song_path = ""
@@ -238,6 +241,7 @@ local clear_queue_context = function()
 	available_chart_options = {}
 	selected_index = 1
 	preview_song_dir = ""
+	next_preview_attempt_at = -1
 	current_queue_item_id = nil
 	current_chart_id = nil
 	queued_song_path = ""
@@ -286,7 +290,7 @@ local set_queue_ready = function()
 	queue_state = "ready"
 	queue_error_title = ""
 	queue_error_detail = ""
-	play_song_preview(target_song)
+	next_preview_attempt_at = GetTimeSinceStart() + queue_preview_start_delay_seconds
 end
 
 local queue_has_loaded_song = function()
@@ -386,11 +390,13 @@ play_song_preview = function(song)
 
 	if ok then
 		preview_song_dir = song_dir
+		next_preview_attempt_at = -1
 	end
 end
 
 stop_song_preview = function()
 	preview_song_dir = ""
+	next_preview_attempt_at = -1
 	if SOUND and SOUND.StopMusic then
 		pcall(function() SOUND:StopMusic() end)
 	end
@@ -1138,6 +1144,13 @@ local t = Def.ActorFrame{
 				current_request = nil
 				handle_queue_request_failure(actor, THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(queue_timeout_seconds))
 				return
+			end
+
+			if queue_state == "ready" and target_song and preview_song_dir == "" and next_preview_attempt_at > -1 and now >= next_preview_attempt_at then
+				play_song_preview(target_song)
+				if preview_song_dir == "" then
+					next_preview_attempt_at = now + preview_retry_interval_seconds
+				end
 			end
 
 			if modal_mode ~= nil then
