@@ -1178,6 +1178,7 @@ local t = Def.ActorFrame{
 			end
 		},
 
+		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PaneDisplay.lua")),
 		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/PerPlayer/default.lua")),
 		LoadActor(THEME:GetPathB("ScreenSelectMusic", "overlay/StepsDisplayList/default.lua")),
 	},
