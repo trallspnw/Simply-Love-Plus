@@ -21,7 +21,7 @@ local current_grade = GetStepManiaServerGradeString(player_stats:GetGrade())
 local current_difficulty_name = GetStepManiaServerDifficultyNameForSteps(current_steps)
 local failed = STATSMAN:GetCurStageStats():AllFailed()
 
-local finish_status = failed and "viewing" or "submitting"
+local finish_status = failed and "menu" or "submitting"
 local finish_detail = ""
 local menu_index = 1
 local pre_play = SL.Global.ServerQueueStartBaseline or {}
@@ -29,6 +29,16 @@ local post_play = SL.Global.ServerQueueFinishResult or nil
 local next_queue_label = ""
 local input
 local input_ready_at = -1
+
+local banner_width = 418 * 0.7
+local panel_w = IsUsingWideScreen() and 250 or 168
+local panel_h = IsUsingWideScreen() and 136 or 126
+local panel_gap = IsUsingWideScreen() and 16 or 8
+local panel_x = _screen.cx + (banner_width * 0.5) + panel_gap + (panel_w * 0.5)
+local panel_y = 108
+local panel_left = panel_x - (panel_w * 0.5) + 12
+local panel_top = panel_y - (panel_h * 0.5)
+local panel_text_w = IsUsingWideScreen() and 300 or 220
 
 local clear_server_session_state = function()
 	SL.Global.ServerModeActive = false
@@ -143,6 +153,17 @@ local format_machine_holder = function(score_data)
 	return THEME:GetString("ScreenQueueReady", "MachineHolder"):format(score_data.held_by)
 end
 
+local format_score_only = function(score_data)
+	if type(score_data) ~= "table" then
+		return THEME:GetString("ScreenQueueReady", "NoHighScore")
+	end
+	local score = tonumber(score_data.score)
+	if not score then
+		return THEME:GetString("ScreenQueueReady", "NoHighScore")
+	end
+	return ("%0.2f"):format(score)
+end
+
 local did_beat_baseline = function(baseline, new_score)
 	local baseline_score = baseline and tonumber(baseline.score) or nil
 	local score_value = tonumber(new_score)
@@ -219,16 +240,36 @@ local request_finish = function()
 		finish_request = nil
 		local decoded = safe_json_decode(response and response.body or "")
 		if response and response.statusCode == 200 and type(decoded) == "table" then
+			post_play = decoded
 			SL.Global.ServerQueueFinishResult = decoded
+			finish_status = "results"
+			finish_detail = THEME:GetString("ScreenEvaluation", "ServerRecorded")
+			if overlay_actor then overlay_actor:queuecommand("RefreshServerQueueFlow") end
+			request_current()
+			return
 		end
-		transition_to_queue_ready()
+
+		local error_text = get_error_detail(response, decoded)
+		local ignored = normalize(error_text) == normalize("queue_item_id does not match the current queue item")
+			or normalize(error_text) == normalize("No current song set")
+
+		finish_status = "results"
+		if ignored then
+			finish_detail = THEME:GetString("ScreenEvaluation", "ServerFinishIgnored")
+		else
+			finish_detail = THEME:GetString("ScreenEvaluation", "ServerFinishFailed"):format(error_text)
+		end
+		if overlay_actor then overlay_actor:queuecommand("RefreshServerQueueFlow") end
+		request_current()
 	end)
 
 	if request then
 		finish_request = request
 		finish_request_started_at = GetTimeSinceStart()
 	else
-		transition_to_queue_ready()
+		finish_status = "results"
+		finish_detail = THEME:GetString("ScreenEvaluation", "ServerFinishFailed"):format(THEME:GetString("ScreenQueueReady", "RequestFailed"))
+		if overlay_actor then overlay_actor:queuecommand("RefreshServerQueueFlow") end
 	end
 end
 
@@ -296,12 +337,6 @@ input = function(event)
 		return true
 	end
 
-	if finish_status == "viewing" then
-		finish_status = "menu"
-		if overlay_actor then overlay_actor:queuecommand("RefreshServerQueueFlow") end
-		return true
-	end
-
 	if finish_status == "menu" then
 		if event.GameButton == "MenuUp" or event.GameButton == "MenuLeft" then
 			menu_index = ((menu_index - 2) % 2) + 1
@@ -332,10 +367,25 @@ input = function(event)
 	end
 
 	if finish_status == "submitting" then
+		return true
+	end
+
+	if finish_status == "results" then
 		if is_start_button(event) then
-			if finish_request then finish_request:Cancel(); finish_request = nil end
 			transition_to_queue_ready()
+			return true
 		end
+
+		if is_back_button(event) then
+			clear_server_session_state()
+			restore_engine_input()
+			if top_screen then
+				top_screen:SetNextScreenName("ScreenTitleMenu")
+				top_screen:StartTransitioningScreen("SM_GoToNextScreen")
+			end
+			return true
+		end
+
 		return true
 	end
 
@@ -367,7 +417,12 @@ local af = Def.ActorFrame{
 			if finish_request and (now - finish_request_started_at) >= timeout_seconds then
 				finish_request:Cancel()
 				finish_request = nil
-				transition_to_queue_ready()
+				finish_status = "results"
+				finish_detail = THEME:GetString("ScreenEvaluation", "ServerFinishFailed"):format(
+					THEME:GetString("ScreenQueueReady", "RequestTimedOut"):format(timeout_seconds)
+				)
+				actor:playcommand("RefreshServerQueueFlow")
+				request_current()
 			end
 		end)
 
@@ -398,7 +453,42 @@ local af = Def.ActorFrame{
 
 		local show_menu = (finish_status == "menu")
 		if fail_menu then fail_menu:visible(show_menu) end
-		if results_panel then results_panel:visible(false) end
+		if results_panel then
+			results_panel:visible(finish_status == "submitting" or finish_status == "results")
+
+			local primary = results_panel:GetChild("PrimaryMessage")
+			local secondary = results_panel:GetChild("SecondaryMessage")
+			local tertiary = results_panel:GetChild("TertiaryMessage")
+
+			local server_pr = did_beat_baseline(pre_play.server_highscore, current_score)
+			local personal_pr = did_beat_baseline(pre_play.user_highscore, current_score)
+			local latest_user = (post_play and post_play.user_highscore) or pre_play.user_highscore
+			local latest_server = (post_play and post_play.server_highscore) or pre_play.server_highscore
+
+			if finish_status == "submitting" then
+				primary:settext(THEME:GetString("ScreenEvaluation", "ServerSubmitting"))
+				primary:diffuse(color("#d8d8d8")):zoom(0.36)
+				secondary:settext("")
+				tertiary:settext("")
+			elseif server_pr then
+				primary:settext("Server Record!")
+				primary:diffuse(color("#f5d36a")):zoom(0.62)
+				secondary:settext("")
+				tertiary:settext("")
+			elseif personal_pr then
+				primary:settext("Personal Record!")
+				primary:diffuse(color("#d8dde6")):zoom(0.44)
+				secondary:settext("Machine Record: " .. format_score_only(latest_server))
+				secondary:zoom(0.44)
+				tertiary:settext("")
+			else
+				primary:settext("Personal Record: " .. format_score_only(latest_user))
+				primary:diffuse(color("#d8d8d8")):zoom(0.34)
+				secondary:settext("Machine Record: " .. format_score_only(latest_server))
+				secondary:zoom(0.32)
+				tertiary:settext("")
+			end
+		end
 
 		-- fail menu option highlighting
 		if show_menu and fail_menu then
@@ -412,125 +502,46 @@ local af = Def.ActorFrame{
 	end,
 
 	-- -----------------------------------------------------------------------
-	-- "Press Start" nudge shown only during the viewing state (failure only)
-	LoadFont("Common Normal")..{
-		Name="ViewingHint",
-		InitCommand=function(self)
-			self:xy(_screen.cx, _screen.h - 24)
-				:zoom(0.44):maxwidth(IsUsingWideScreen() and 980 or 800)
-				:diffuse(color("#9ca3af")):diffusealpha(0)
-		end,
-		OnCommand=function(self)
-			if failed then
-				self:settext(THEME:GetString("ScreenEvaluation", "ServerViewingHint"))
-					:linear(0.4):diffusealpha(1)
-			end
-		end,
-		RefreshServerQueueFlowCommand=function(self)
-			self:visible(finish_status == "viewing")
-		end,
-	},
-
-	-- -----------------------------------------------------------------------
 	-- Results panel (shown for submitting and results states)
 	Def.ActorFrame{
 		Name="ResultsPanel",
 		InitCommand=function(self) self:visible(false) end,
 
-		-- background: center at cy+100, height 190
 		Def.Quad{
 			InitCommand=function(self)
-				local w = IsUsingWideScreen() and 560 or 460
-				self:xy(_screen.cx, _screen.cy + 100)
-					:zoomto(w, 190)
+				self:xy(panel_x, panel_y)
+					:zoomto(panel_w, panel_h)
 					:diffuse(color("#000000")):diffusealpha(0.72)
 			end
 		},
 
-		-- status line (submitting / recorded / error)
-		LoadFont("Common Normal")..{
-			Name="StatusText",
+		LoadFont("Common Bold")..{
+			Name="PrimaryMessage",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 12)
-					:zoom(0.48):maxwidth(IsUsingWideScreen() and 980 or 800)
+				self:xy(panel_x, panel_y - 12)
+					:zoom(0.56)
+					:maxwidth(panel_w * 1.45)
+					:vertalign(0.5)
+			end
+		},
+		LoadFont("Common Bold")..{
+			Name="SecondaryMessage",
+			InitCommand=function(self)
+				self:xy(panel_x, panel_y + 18)
+					:zoom(0.44)
+					:maxwidth(panel_w * 1.7)
 					:diffuse(color("#d8d8d8"))
-			end
-		},
-
-		-- pre-play section
-		LoadFont("Common Normal")..{
-			Text=THEME:GetString("ScreenEvaluation", "ServerPrePlayLabel"),
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 36):zoom(0.44):diffuse(color("#9ca3af"))
+					:vertalign(0.5)
 			end
 		},
 		LoadFont("Common Normal")..{
-			Name="PreUserValue",
+			Name="TertiaryMessage",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 54):zoom(0.52):maxwidth(IsUsingWideScreen() and 900 or 740)
-			end
-		},
-		LoadFont("Common Normal")..{
-			Name="PreMachineValue",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 70):zoom(0.52):maxwidth(IsUsingWideScreen() and 900 or 740)
-			end
-		},
-		-- pre machine holder shares row with machine value via settext
-		LoadFont("Common Normal")..{
-			Name="PreMachineHolder",
-			InitCommand=function(self)
-				self:visible(false)  -- unused; holder info omitted for compactness
-			end
-		},
-
-		-- post-play section
-		LoadFont("Common Normal")..{
-			Text=THEME:GetString("ScreenEvaluation", "ServerPostPlayLabel"),
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 94):zoom(0.44):diffuse(color("#9ca3af"))
-			end
-		},
-		LoadFont("Common Normal")..{
-			Name="PostUserValue",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 112):zoom(0.52):maxwidth(IsUsingWideScreen() and 900 or 740)
-			end
-		},
-		LoadFont("Common Normal")..{
-			Name="PostMachineValue",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 128):zoom(0.52):maxwidth(IsUsingWideScreen() and 900 or 740)
-			end
-		},
-		LoadFont("Common Normal")..{
-			Name="PostMachineHolder",
-			InitCommand=function(self)
-				self:visible(false)  -- unused; holder info omitted for compactness
-			end
-		},
-
-		-- PR message
-		LoadFont("Common Normal")..{
-			Name="PRText",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 150):zoom(0.46):maxwidth(IsUsingWideScreen() and 980 or 800):diffuse(color("#ffef9a"))
-			end
-		},
-
-		-- next queue label
-		LoadFont("Common Normal")..{
-			Name="NextQueueText",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 168):zoom(0.42):maxwidth(IsUsingWideScreen() and 980 or 800):diffuse(color("#c7d2fe"))
-			end
-		},
-
-		-- control hint at bottom of panel
-		LoadFont("Common Normal")..{
-			Name="HintText",
-			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 186):zoom(0.38):maxwidth(IsUsingWideScreen() and 980 or 800):diffuse(color("#6b7280"))
+				self:xy(panel_x, panel_y + 40)
+					:zoom(0.30)
+					:maxwidth(panel_w * 1.7)
+					:diffuse(color("#c7d2fe"))
+					:vertalign(0.5)
 			end
 		},
 	},
@@ -543,33 +554,35 @@ local af = Def.ActorFrame{
 
 		Def.Quad{
 			InitCommand=function(self)
-				local w = IsUsingWideScreen() and 420 or 340
-				self:xy(_screen.cx, _screen.cy + 4)
-					:zoomto(w, 150)
+				self:xy(panel_x, panel_y)
+					:zoomto(panel_w, 122)
 					:diffuse(color("#000000")):diffusealpha(0.84)
 			end
 		},
 		LoadFont("Common Bold")..{
 			Text=THEME:GetString("ScreenEvaluation", "ServerFailMenuTitle"),
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy - 60)
-					:zoom(0.72):maxwidth(IsUsingWideScreen() and 700 or 580)
+				self:xy(panel_left, panel_top - 6)
+					:zoom(0.40):horizalign(0)
+					:maxwidth(panel_text_w)
 			end
 		},
 		LoadFont("Common Normal")..{
 			Text=THEME:GetString("ScreenEvaluation", "ServerForfeit"),
 			Name="Option1",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy - 12)
-					:zoom(0.80):maxwidth(IsUsingWideScreen() and 680 or 560)
+				self:xy(panel_left, panel_top + 28)
+					:zoom(0.42):horizalign(0)
+					:maxwidth(panel_text_w)
 			end
 		},
 		LoadFont("Common Normal")..{
 			Text=THEME:GetString("ScreenEvaluation", "ServerRetry"),
 			Name="Option2",
 			InitCommand=function(self)
-				self:xy(_screen.cx, _screen.cy + 26)
-					:zoom(0.80):maxwidth(IsUsingWideScreen() and 680 or 560)
+				self:xy(panel_left, panel_top + 56)
+					:zoom(0.42):horizalign(0)
+					:maxwidth(panel_text_w)
 			end
 		},
 	},

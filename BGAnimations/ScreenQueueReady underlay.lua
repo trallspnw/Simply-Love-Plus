@@ -938,8 +938,6 @@ input = function(event)
 		apply_selected_chart()
 		update_highscores_for_selected_difficulty()
 		top_screen:GetChild("Underlay"):playcommand("Refresh")
-		local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
-		if snd then snd:play() end
 		return true
 	end
 
@@ -947,8 +945,6 @@ input = function(event)
 		apply_selected_chart()
 		update_highscores_for_selected_difficulty()
 		top_screen:GetChild("Underlay"):playcommand("Refresh")
-		local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
-		if snd then snd:play() end
 		return true
 	end
 

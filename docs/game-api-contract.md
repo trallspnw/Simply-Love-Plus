@@ -1,7 +1,7 @@
 # Game API Contract (Machine/Theme Client)
 
 ## Last Verified
-2026-03-28 (updated for explicit played difficulty on `start` and `finish`)
+2026-03-28 (updated for `chart_highscores` array on `current`)
 
 ## Auth
 - Header: `Authorization: Bearer {machine_token}`
@@ -64,7 +64,34 @@ Success with current song present:
     "score": 99.12,
     "grade": "AAA",
     "held_by": "Alex"
-  }
+  },
+  "chart_highscores": [
+    {
+      "chart_id": 1001,
+      "difficulty_name": "Easy",
+      "meter": 4,
+      "user_highscore": null,
+      "server_highscore": {
+        "score": 95.12,
+        "grade": "A",
+        "held_by": "Alex"
+      }
+    },
+    {
+      "chart_id": 1002,
+      "difficulty_name": "Hard",
+      "meter": 8,
+      "user_highscore": {
+        "score": 97.43,
+        "grade": "AA"
+      },
+      "server_highscore": {
+        "score": 99.12,
+        "grade": "AAA",
+        "held_by": "Alex"
+      }
+    }
+  ]
 }
 ```
 
@@ -75,6 +102,12 @@ Response fields:
 - `player`: The active player for the current song, if known.
 - `user_highscore`: Best recorded score for the current player on the current chart.
 - `server_highscore`: Best recorded score for any player on the current chart, including `held_by`.
+- `chart_highscores`: Per-chart highscores for every available chart on the queued song. Used by the client to update ready-screen high score display immediately when difficulty changes without an extra round-trip.
+- `chart_highscores[].chart_id`: The server chart id for that chart.
+- `chart_highscores[].difficulty_name`: Normalized difficulty name for that chart.
+- `chart_highscores[].meter`: Meter for that chart.
+- `chart_highscores[].user_highscore`: Best recorded score for the current player on that chart (null if none).
+- `chart_highscores[].server_highscore`: Best recorded score for any player on that chart, including `held_by` (null if none).
 
 Notes:
 - High scores are chart-specific, not just song-specific.
@@ -364,5 +397,6 @@ Known limitations at the time of writing:
 - `start` requires both `queue_item_id` and the selected `difficulty_name`.
 - `skip` requires `queue_item_id`.
 - `finish` requires `queue_item_id` and the actually played `difficulty_name`.
+- `current` returns `chart_highscores` for all available charts so the client can update score display on difficulty change without a network round-trip.
 - `start` returns pre-play high score context for the selected chart and can be used as the baseline for result-page PR messaging.
 - `finish` returns updated high score context that can be used immediately on the result screen.

@@ -177,7 +177,12 @@ end
 
 Branch.AfterHeartEntry = function()
 	local pm = ToEnumShortString(GAMESTATE:GetPlayMode())
-	if( pm == "Regular" ) then return "ScreenEvaluationStage" end
+	if( pm == "Regular" ) then
+		if SL.Global.ServerModeActive or SL.Global.GameMode == "Server" then
+			return "ScreenEvaluationStageServer"
+		end
+		return "ScreenEvaluationStage"
+	end
 	if( pm == "Nonstop" ) then return "ScreenEvaluationNonstop" end
 end
 
