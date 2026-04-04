@@ -148,6 +148,7 @@ local GlobalDefaults = {
 			self.ServerModeActive = false
 			self.StepManiaServer = StepManiaServerConfig and StepManiaServerConfig.Get() or { Url = "", Token = "" }
 			self.ServerQueueItemId = nil
+			self.ServerQueueSelectedChartId = nil
 			self.ServerQueueSelectedDifficultyName = ""
 			self.ServerQueueCurrent = nil
 			self.ServerQueuePrefetch = nil

@@ -18,7 +18,7 @@ local player_stats = STATSMAN:GetCurStageStats():GetPlayerStageStats(master_play
 local current_steps = GAMESTATE:GetCurrentSteps(master_player)
 local current_score = GetStepManiaServerScoreFromPercentDP(player_stats:GetPercentDancePoints())
 local current_grade = GetStepManiaServerGradeString(player_stats:GetGrade())
-local current_difficulty_name = GetStepManiaServerDifficultyNameForSteps(current_steps)
+local current_chart_id = SL.Global.ServerQueueSelectedChartId
 local failed = STATSMAN:GetCurStageStats():AllFailed()
 
 local finish_status = failed and "failed" or "submitting"
@@ -43,6 +43,7 @@ local panel_text_w = IsUsingWideScreen() and 300 or 220
 local clear_server_session_state = function()
 	SL.Global.ServerModeActive = false
 	SL.Global.ServerQueueItemId = nil
+	SL.Global.ServerQueueSelectedChartId = nil
 	SL.Global.ServerQueueSelectedDifficultyName = ""
 	SL.Global.ServerQueueCurrent = nil
 	SL.Global.ServerQueuePrefetch = nil
@@ -308,7 +309,7 @@ local request_finish = function()
 	if finish_request then finish_request:Cancel(); finish_request = nil end
 
 	local body = BuildStepManiaServerSongRequestBody({
-		difficulty_name = current_difficulty_name,
+		chart_id = current_chart_id,
 		score = current_score,
 		grade = current_grade,
 	})

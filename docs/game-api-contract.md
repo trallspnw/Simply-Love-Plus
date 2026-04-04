@@ -1,7 +1,7 @@
 # Game API Contract (Machine/Theme Client)
 
 ## Last Verified
-2026-03-28 (updated for `chart_highscores` array on `current`)
+2026-04-03 (updated for `chart_id` on `start`/`finish`)
 
 ## Auth
 - Header: `Authorization: Bearer {machine_token}`
@@ -98,7 +98,7 @@ Success with current song present:
 Response fields:
 - `queue_item_id`: The current queue entry id. Pass this back to `POST /api/game/song/start`, `POST /api/game/song/skip`, and `POST /api/game/song/finish`.
 - `song.file_path`: Relative song path used by the server, matching ingested `Song.filePath`.
-- `song.difficulty_name`: The selected chart difficulty name.
+- `song.difficulty_name`: The queued chart difficulty name.
 - `player`: The active player for the current song, if known.
 - `user_highscore`: Best recorded score for the current player on the current chart.
 - `server_highscore`: Best recorded score for any player on the current chart, including `held_by`.
@@ -125,13 +125,13 @@ Request body:
 ```json
 {
   "queue_item_id": 42,
-  "difficulty_name": "Hard"
+  "chart_id": 1002
 }
 ```
 
 Request field rules:
 - `queue_item_id`: Required positive integer. It must match the current queue head or the request fails with `400` and no state change occurs.
-- `difficulty_name`: Required non-empty string. This is the difficulty the client intends to play. The server normalizes common aliases like `Challenge` to `Expert` and resolves the chart against the queued song.
+- `chart_id`: Required positive integer. This is the exact chart the client intends to play. It must belong to the queued song and queued chart mode.
 
 Success:
 
@@ -141,6 +141,7 @@ Success:
   "queue_item_id": 42,
   "song": {
     "file_path": "1Arc2008 - DDR X/Butterfly",
+    "chart_id": 1002,
     "difficulty_name": "Hard"
   },
   "player": {
@@ -176,13 +177,13 @@ or:
 or:
 
 ```json
-{ "error": "difficulty_name must be a non-empty string" }
+{ "error": "chart_id must be a positive integer" }
 ```
 
 or:
 
 ```json
-{ "error": "difficulty_name does not match an available chart for the queued song" }
+{ "error": "chart_id does not match an available chart for the queued song" }
 ```
 
 Status: `400`
@@ -267,7 +268,7 @@ Request body:
 {
   "score": 100.00,
   "grade": "AAA",
-  "difficulty_name": "Hard",
+  "chart_id": 1002,
   "queue_item_id": 42
 }
 ```
@@ -277,7 +278,7 @@ Optional test payload:
 ```json
 {
   "queue_item_id": 42,
-  "difficulty_name": "Easy",
+  "chart_id": 1002,
   "score": 75.23,
   "grade": "B",
   "test": true
@@ -287,7 +288,7 @@ Optional test payload:
 Request field rules:
 - `score`: Required non-negative decimal value.
 - `grade`: Required non-empty string.
-- `difficulty_name`: Required non-empty string. This is the difficulty actually played by the client. The server normalizes common aliases like `Challenge` to `Expert` and resolves the chart against the queued song.
+- `chart_id`: Required positive integer. This is the exact chart actually played by the client. It must belong to the queued song and queued chart mode.
 - `test`: Optional boolean. When `true`, the resulting `PlayHistory` row is marked as test data.
 - `queue_item_id`: Required positive integer. It must match the current queue head or the request fails with `400` and no state change occurs.
 
@@ -322,10 +323,10 @@ If `queue_item_id` does not match the active queue head:
 
 Status: `400`
 
-If `difficulty_name` does not match an available chart for the queued song:
+If `chart_id` does not match an available chart for the queued song:
 
 ```json
-{ "error": "difficulty_name does not match an available chart for the queued song" }
+{ "error": "chart_id does not match an available chart for the queued song" }
 ```
 
 Status: `400`

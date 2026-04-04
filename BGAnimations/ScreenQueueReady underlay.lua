@@ -18,10 +18,11 @@ local queue_state = "loading"
 local queue_error_title = ""
 local queue_error_detail = ""
 local target_song
-local available_steps = {}
+local available_chart_options = {}
 local selected_index = 1
 local preview_song_dir = ""
 local current_queue_item_id = nil
+local current_chart_id = nil
 local queued_song_path = ""
 local queued_difficulty_name = ""
 local queued_player_name = ""
@@ -234,10 +235,11 @@ local clear_queue_context = function()
 		pcall(function() SOUND:StopMusic() end)
 	end
 	target_song = nil
-	available_steps = {}
+	available_chart_options = {}
 	selected_index = 1
 	preview_song_dir = ""
 	current_queue_item_id = nil
+	current_chart_id = nil
 	queued_song_path = ""
 	queued_difficulty_name = ""
 	queued_player_name = ""
@@ -245,6 +247,7 @@ local clear_queue_context = function()
 	queued_server_highscore = nil
 	queued_chart_highscores = nil
 	SL.Global.ServerQueueItemId = nil
+	SL.Global.ServerQueueSelectedChartId = nil
 	SL.Global.ServerQueueCurrent = nil
 	SL.Global.ServerQueueSelectedDifficultyName = ""
 end
@@ -294,12 +297,26 @@ local schedule_queue_poll = function()
 	queue_next_poll_at = GetTimeSinceStart() + queue_poll_interval_seconds
 end
 
+local get_selected_chart_option = function()
+	return available_chart_options[selected_index]
+end
+
 local get_selected_steps = function()
-	return available_steps[selected_index]
+	local option = get_selected_chart_option()
+	return option and option.steps or nil
 end
 
 local get_selected_difficulty_name = function()
+	local option = get_selected_chart_option()
+	if option and option.difficulty_name and option.difficulty_name ~= "" then
+		return option.difficulty_name
+	end
 	return GetStepManiaServerDifficultyNameForSteps(get_selected_steps())
+end
+
+local get_selected_chart_id = function()
+	local option = get_selected_chart_option()
+	return option and option.chart_id or nil
 end
 
 local apply_selected_chart = function()
@@ -314,6 +331,8 @@ local apply_selected_chart = function()
 		GAMESTATE:SetPreferredDifficulty(pn, steps:GetDifficulty())
 	end
 
+	current_chart_id = get_selected_chart_id()
+	SL.Global.ServerQueueSelectedChartId = current_chart_id
 	SL.Global.ServerQueueSelectedDifficultyName = get_selected_difficulty_name()
 end
 
@@ -451,20 +470,14 @@ local format_machine_holder = function(score_data)
 end
 
 local update_highscores_for_selected_difficulty = function()
-	if type(queued_chart_highscores) ~= "table" then return end
-
-	local selected_name = NormalizeStepManiaServerDifficultyName(get_selected_difficulty_name())
-	for _, entry in ipairs(queued_chart_highscores) do
-		local entry_name = NormalizeStepManiaServerDifficultyName(tostring(entry.difficulty_name or ""))
-		if entry_name == selected_name then
-			queued_user_highscore = entry.user_highscore
-			queued_server_highscore = entry.server_highscore
-			return
-		end
+	local option = get_selected_chart_option()
+	if option then
+		queued_user_highscore = option.user_highscore
+		queued_server_highscore = option.server_highscore
+	else
+		queued_user_highscore = nil
+		queued_server_highscore = nil
 	end
-
-	queued_user_highscore = nil
-	queued_server_highscore = nil
 end
 
 local difficulty_note_for_selection = function()
@@ -479,7 +492,7 @@ local difficulty_note_for_selection = function()
 end
 
 local try_change_difficulty = function(direction)
-	if #available_steps <= 1 then return false end
+	if #available_chart_options <= 1 then return false end
 
 	local now = GetTimeSinceStart()
 	local same_direction = (last_diff_direction == direction)
@@ -493,9 +506,9 @@ local try_change_difficulty = function(direction)
 	end
 
 	if direction == "up" then
-		selected_index = ((selected_index - 2) % #available_steps) + 1
+		selected_index = ((selected_index - 2) % #available_chart_options) + 1
 	else
-		selected_index = (selected_index % #available_steps) + 1
+		selected_index = (selected_index % #available_chart_options) + 1
 	end
 
 	last_diff_direction = nil
@@ -656,6 +669,124 @@ end
 local process_current_body
 local request_current
 
+local scores_match = function(left, right)
+	if left == nil and right == nil then return true end
+	if type(left) ~= "table" or type(right) ~= "table" then return false end
+	return tonumber(left.score) == tonumber(right.score) and tostring(left.grade or "") == tostring(right.grade or "")
+end
+
+local build_chart_options = function(song, chart_highscores)
+	local steps_list = get_steps_for_current_style(song)
+	if #steps_list == 0 then return {} end
+
+	if type(chart_highscores) ~= "table" or #chart_highscores == 0 then
+		local fallback_options = {}
+		for _, steps in ipairs(steps_list) do
+			fallback_options[#fallback_options+1] = {
+				steps = steps,
+				chart_id = nil,
+				difficulty_name = GetStepManiaServerDifficultyNameForSteps(steps),
+				meter = steps:GetMeter(),
+				user_highscore = nil,
+				server_highscore = nil,
+			}
+		end
+		return fallback_options
+	end
+
+	local options = {}
+	local used_steps = {}
+
+	for _, entry in ipairs(chart_highscores) do
+		local matched_index = nil
+
+		for i, steps in ipairs(steps_list) do
+			if not used_steps[i]
+			and DoesStepManiaServerDifficultyMatch(steps, entry.difficulty_name)
+			and tonumber(steps:GetMeter()) == tonumber(entry.meter)
+			then
+				matched_index = i
+				break
+			end
+		end
+
+		if not matched_index then
+			for i, steps in ipairs(steps_list) do
+				if not used_steps[i] and DoesStepManiaServerDifficultyMatch(steps, entry.difficulty_name) then
+					matched_index = i
+					break
+				end
+			end
+		end
+
+		if matched_index then
+			used_steps[matched_index] = true
+			options[#options+1] = {
+				steps = steps_list[matched_index],
+				chart_id = tonumber(entry.chart_id),
+				difficulty_name = tostring(entry.difficulty_name or ""),
+				meter = tonumber(entry.meter),
+				user_highscore = entry.user_highscore,
+				server_highscore = entry.server_highscore,
+			}
+		end
+	end
+
+	if #options == 0 then
+		for _, steps in ipairs(steps_list) do
+			options[#options+1] = {
+				steps = steps,
+				chart_id = nil,
+				difficulty_name = GetStepManiaServerDifficultyNameForSteps(steps),
+				meter = steps:GetMeter(),
+				user_highscore = nil,
+				server_highscore = nil,
+			}
+		end
+	end
+
+	return options
+end
+
+local find_initial_chart_index = function(options, song_data, user_highscore, server_highscore)
+	local song_chart_id = type(song_data) == "table" and tonumber(song_data.chart_id) or nil
+	if song_chart_id ~= nil then
+		for i, option in ipairs(options) do
+			if option.chart_id == song_chart_id then
+				return i
+			end
+		end
+	end
+
+	local difficulty_name = type(song_data) == "table" and tostring(song_data.difficulty_name or "") or ""
+	local difficulty_matches = {}
+	for i, option in ipairs(options) do
+		if NormalizeStepManiaServerDifficultyName(option.difficulty_name) == NormalizeStepManiaServerDifficultyName(difficulty_name) then
+			difficulty_matches[#difficulty_matches+1] = i
+		end
+	end
+
+	for _, i in ipairs(difficulty_matches) do
+		local option = options[i]
+		if scores_match(option.user_highscore, user_highscore) and scores_match(option.server_highscore, server_highscore) then
+			return i
+		end
+	end
+
+	if #difficulty_matches == 1 then
+		return difficulty_matches[1]
+	end
+
+	for _, i in ipairs(difficulty_matches) do
+		local option = options[i]
+		if scores_match(option.user_highscore, user_highscore) or scores_match(option.server_highscore, server_highscore) then
+			return i
+		end
+	end
+
+	return difficulty_matches[1] or 1
+end
+
 local handle_queue_request_failure = function(frame, detail)
 	queue_consecutive_failures = queue_consecutive_failures + 1
 
@@ -704,15 +835,15 @@ process_current_body = function(frame, body, force_apply)
 		return
 	end
 
-	local steps_list = get_steps_for_current_style(song)
-	if #steps_list == 0 then
+	local chart_options = build_chart_options(song, body.chart_highscores)
+	if #chart_options == 0 then
 		handle_queue_request_failure(frame, THEME:GetString("ScreenQueueReady", "MissingChart"))
 		return
 	end
 
 	target_song = song
-	available_steps = steps_list
-	selected_index = find_step_index_for_difficulty(steps_list, context.song.difficulty_name or "") or 1
+	available_chart_options = chart_options
+	selected_index = find_initial_chart_index(chart_options, context.song, context.user_highscore, context.server_highscore)
 	current_queue_item_id = queue_item_id
 	queued_song_path = context.song.file_path or ""
 	queued_difficulty_name = context.song.difficulty_name or ""
@@ -723,6 +854,7 @@ process_current_body = function(frame, body, force_apply)
 	SL.Global.ServerQueueItemId = current_queue_item_id
 	SL.Global.ServerQueueCurrent = body
 	apply_selected_chart()
+	update_highscores_for_selected_difficulty()
 	set_queue_ready()
 	close_modal()
 	schedule_queue_poll()
@@ -778,7 +910,7 @@ local request_start = function(frame)
 	pending_action = "start"
 
 	local request_body = BuildStepManiaServerSongRequestBody({
-		difficulty_name = get_selected_difficulty_name(),
+		chart_id = get_selected_chart_id(),
 	})
 
 	local request, error_detail = build_server_request(START_ENDPOINT, "POST", request_body, function(response)
@@ -791,12 +923,14 @@ local request_start = function(frame)
 		end
 
 		SL.Global.ServerQueueStartBaseline = {
-			difficulty_name = request_body.difficulty_name,
+			chart_id = request_body.chart_id,
+			difficulty_name = get_selected_difficulty_name(),
 			user_highscore = body and body.user_highscore or nil,
 			server_highscore = body and body.server_highscore or nil,
 		}
 		SL.Global.ServerQueueFinishResult = nil
-		SL.Global.ServerQueueSelectedDifficultyName = request_body.difficulty_name
+		SL.Global.ServerQueueSelectedChartId = request_body.chart_id
+		SL.Global.ServerQueueSelectedDifficultyName = get_selected_difficulty_name()
 
 		local snd = frame:GetChild("start_sound")
 		if snd then snd:play() end
