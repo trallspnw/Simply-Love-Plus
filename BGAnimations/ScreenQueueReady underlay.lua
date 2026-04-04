@@ -561,8 +561,21 @@ local update_view = function(frame)
 	end
 
 	if modal_mode ~= nil and modal_overlay then
-		modal_overlay:GetChild("ModalTitle"):settext(modal_title)
-		modal_overlay:GetChild("ModalDetail"):settext(modal_detail)
+		local is_menu = (modal_mode == "menu")
+		local modal_bg = modal_overlay:GetChild("ModalBackground")
+		local modal_title_actor = modal_overlay:GetChild("ModalTitle")
+		local modal_detail_actor = modal_overlay:GetChild("ModalDetail")
+		if modal_bg then
+			modal_bg:zoomto(is_menu and 310 or 620, is_menu and 124 or 230)
+		end
+		if modal_title_actor then
+			modal_title_actor:visible(not is_menu)
+			modal_title_actor:settext(is_menu and "" or modal_title)
+		end
+		if modal_detail_actor then
+			modal_detail_actor:visible(not is_menu)
+			modal_detail_actor:settext(is_menu and "" or modal_detail)
+		end
 		local options = modal_overlay:GetChild("Options")
 		if options then
 			for i = 1, 3 do
@@ -1218,6 +1231,7 @@ local t = Def.ActorFrame{
 		InitCommand=function(self) self:visible(false) end,
 
 		Def.Quad{
+			Name="ModalBackground",
 			InitCommand=function(self)
 				self:Center():zoomto(620, 230):diffuse(color("#000000")):diffusealpha(0.88)
 			end
@@ -1239,19 +1253,19 @@ local t = Def.ActorFrame{
 			LoadFont("Common Normal")..{
 				Name="Option1",
 				InitCommand=function(self)
-					self:xy(_screen.cx, _screen.cy + 38):zoom(0.82):maxwidth(400)
+					self:xy(_screen.cx, _screen.cy - 34):zoom(0.82):maxwidth(400)
 				end
 			},
 			LoadFont("Common Normal")..{
 				Name="Option2",
 				InitCommand=function(self)
-					self:xy(_screen.cx, _screen.cy + 72):zoom(0.82):maxwidth(400)
+					self:xy(_screen.cx, _screen.cy):zoom(0.82):maxwidth(400)
 				end
 			},
 			LoadFont("Common Normal")..{
 				Name="Option3",
 				InitCommand=function(self)
-					self:xy(_screen.cx, _screen.cy + 106):zoom(0.82):maxwidth(400)
+					self:xy(_screen.cx, _screen.cy + 34):zoom(0.82):maxwidth(400)
 				end
 			},
 		},
