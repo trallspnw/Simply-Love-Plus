@@ -447,6 +447,7 @@ local open_back_menu = function()
 	modal_detail = THEME:GetString("ScreenQueueReady", "BackMenuDetail")
 	modal_options = {
 		THEME:GetString("ScreenQueueReady", "MenuContinue"),
+		THEME:GetString("ScreenQueueReady", "MenuSongOptions"),
 		THEME:GetString("ScreenQueueReady", "MenuSkip"),
 		THEME:GetString("ScreenQueueReady", "MenuExit"),
 	}
@@ -579,14 +580,14 @@ local update_view = function(frame)
 		modal_overlay:visible(modal_mode ~= nil)
 	end
 
-	if modal_mode ~= nil and modal_overlay then
-		local is_menu = (modal_mode == "menu")
-		local modal_bg = modal_overlay:GetChild("ModalBackground")
-		local modal_title_actor = modal_overlay:GetChild("ModalTitle")
-		local modal_detail_actor = modal_overlay:GetChild("ModalDetail")
-		if modal_bg then
-			modal_bg:zoomto(is_menu and 310 or 620, is_menu and 124 or 230)
-		end
+		if modal_mode ~= nil and modal_overlay then
+			local is_menu = (modal_mode == "menu")
+			local modal_bg = modal_overlay:GetChild("ModalBackground")
+			local modal_title_actor = modal_overlay:GetChild("ModalTitle")
+			local modal_detail_actor = modal_overlay:GetChild("ModalDetail")
+			if modal_bg then
+				modal_bg:zoomto(is_menu and 310 or 620, is_menu and 164 or 230)
+			end
 		if modal_title_actor then
 			modal_title_actor:visible(not is_menu)
 			modal_title_actor:settext(is_menu and "" or modal_title)
@@ -597,7 +598,7 @@ local update_view = function(frame)
 		end
 		local options = modal_overlay:GetChild("Options")
 		if options then
-			for i = 1, 3 do
+			for i = 1, 4 do
 				local option = options:GetChild("Option" .. i)
 				if option then
 					local text = modal_options[i] or ""
@@ -990,6 +991,12 @@ local request_skip = function(frame)
 	end
 end
 
+local request_song_options = function()
+	SL.Global.ScreenAfter.PlayerOptions = "ScreenQueueReady"
+	close_modal()
+	transition_to("ScreenPlayerOptions")
+end
+
 input = function(event)
 	if not event or event.type == "InputEventType_Release" then return false end
 
@@ -1029,12 +1036,16 @@ input = function(event)
 				close_modal()
 				top_screen:GetChild("Underlay"):playcommand("Refresh")
 			elseif modal_index == 2 then
-				request_skip(top_screen:GetChild("Underlay"))
+				request_song_options()
 			else
-				SL.Global.ServerModeActive = false
-				clear_server_session_state()
-				close_modal()
-				transition_to("ScreenTitleMenu")
+				if modal_index == 3 then
+					request_skip(top_screen:GetChild("Underlay"))
+				else
+					SL.Global.ServerModeActive = false
+					clear_server_session_state()
+					close_modal()
+					transition_to("ScreenTitleMenu")
+				end
 			end
 			return true
 		end
@@ -1121,6 +1132,7 @@ local t = Def.ActorFrame{
 		local continuing_server_flow = SL.Global.ServerModeActive
 		SL.Global.ServerModeActive = true
 		SL.Global.GameMode = "Server"
+		SL.Global.ScreenAfter.PlayerOptions = "ScreenGameplay"
 		GAMESTATE:SetCurrentPlayMode("PlayMode_Regular")
 
 		local song_options = GAMESTATE:GetSongOptionsObject("ModsLevel_Preferred")
@@ -1400,19 +1412,25 @@ local t = Def.ActorFrame{
 			LoadFont("Common Normal")..{
 				Name="Option1",
 				InitCommand=function(self)
-					self:xy(_screen.cx, _screen.cy - 34):zoom(0.82):maxwidth(400)
+					self:xy(_screen.cx, _screen.cy - 54):zoom(0.82):maxwidth(400)
 				end
 			},
 			LoadFont("Common Normal")..{
 				Name="Option2",
 				InitCommand=function(self)
-					self:xy(_screen.cx, _screen.cy):zoom(0.82):maxwidth(400)
+					self:xy(_screen.cx, _screen.cy - 18):zoom(0.82):maxwidth(400)
 				end
 			},
 			LoadFont("Common Normal")..{
 				Name="Option3",
 				InitCommand=function(self)
-					self:xy(_screen.cx, _screen.cy + 34):zoom(0.82):maxwidth(400)
+					self:xy(_screen.cx, _screen.cy + 18):zoom(0.82):maxwidth(400)
+				end
+			},
+			LoadFont("Common Normal")..{
+				Name="Option4",
+				InitCommand=function(self)
+					self:xy(_screen.cx, _screen.cy + 54):zoom(0.82):maxwidth(400)
 				end
 			},
 		},
