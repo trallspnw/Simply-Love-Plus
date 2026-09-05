@@ -606,9 +606,11 @@ local update_view = function(frame)
 				local option = options:GetChild("Option" .. i)
 				if option then
 					local text = modal_options[i] or ""
+					local is_selected = (i == modal_index)
 					option:settext(text)
 					option:visible(text ~= "")
-					option:diffuse(i == modal_index and color("#ffffff") or color("#bbbbbb"))
+					option:diffuse(is_selected and color("#ffffff") or color("#bbbbbb"))
+					option:zoom(is_selected and 0.98 or 0.82)
 				end
 			end
 		end

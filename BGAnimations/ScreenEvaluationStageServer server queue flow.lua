@@ -593,7 +593,9 @@ local af = Def.ActorFrame{
 			for i = 1, menu_num_options do
 				local option = fail_menu:GetChild("Option" .. i)
 				if option then
-					option:diffuse(i == menu_index and color("#ffffff") or color("#bbbbbb"))
+					local is_selected = (i == menu_index)
+					option:diffuse(is_selected and color("#ffffff") or color("#bbbbbb"))
+					option:zoom(is_selected and 1.38 or 1.16)
 				end
 			end
 		end
