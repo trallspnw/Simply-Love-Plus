@@ -26,7 +26,7 @@ This is the durable context index for this fork. Keep this file lightweight and 
 | Server Queue Media Plan | Planned banner-art and preview-audio features for the queue flow, with current blockers and research needs. | [docs/server-queue-media-plan.md](./docs/server-queue-media-plan.md) | 2026-03-28 |
 | Server Queue Flow Plan | Planned queue polling, state transitions, start/skip/finish lifecycle, and score display behavior for the machine-driven flow. | [docs/server-queue-flow-plan.md](./docs/server-queue-flow-plan.md) | 2026-03-28 |
 | StepMania Server Config | Machine-level storage pattern for backend URL/token and runtime access points. | [docs/stepmania-server-config.md](./docs/stepmania-server-config.md) | 2026-03-12 |
-| Server Mode Song Art Debugging | Findings from debugging why song-folder art misrenders on `ScreenQueueReady` and the recommended reuse path. | [docs/server-mode-song-art-debugging.md](./docs/server-mode-song-art-debugging.md) | 2026-03-12 |
+| Server Mode Song Art Debugging | Resolved: `ScreenQueueReady` banner now uses `Def.Banner:LoadFromSong`, matching ScreenEvaluation/ScreenSelectMusic. | [docs/server-mode-song-art-debugging.md](./docs/server-mode-song-art-debugging.md) | 2026-09-04 |
 
 ## Template For New Entries
 Use this row format when adding docs:

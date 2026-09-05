@@ -24,6 +24,8 @@ local selected_index = 1
 local preview_song_dir = ""
 local next_preview_attempt_at = -1
 local preview_retry_interval_seconds = 0.35
+local banner_song_dir = ""
+local pending_banner_song = nil
 local current_queue_item_id = nil
 local current_chart_id = nil
 local queued_song_path = ""
@@ -241,6 +243,8 @@ local clear_queue_context = function()
 	available_chart_options = {}
 	selected_index = 1
 	preview_song_dir = ""
+	banner_song_dir = ""
+	pending_banner_song = nil
 	next_preview_attempt_at = -1
 	current_queue_item_id = nil
 	current_chart_id = nil
@@ -641,6 +645,28 @@ local update_view = function(frame)
 	local score_note = loaded_content and loaded_content:GetChild("ScoreNoteText")
 
 	if not target_song then return end
+
+	local banner_frame = loaded_content and loaded_content:GetChild("BannerFrame")
+	local song_banner = banner_frame and banner_frame:GetChild("SongBanner")
+	local fallback_banner = banner_frame and banner_frame:GetChild("ServerBannerFallback")
+	local has_banner = target_song:HasBanner()
+	local song_dir = normalize(target_song:GetSongDir())
+
+	if song_banner then
+		-- Loading the texture here (synchronously, wherever update_view happens to be
+		-- called from -- including a network onResponse callback) produces a blank/
+		-- undersized banner. Queueing it and loading from the screen's own per-frame
+		-- Update function is what actually works, matching the one path that already
+		-- rendered correctly: re-entering this screen, where OnCommand loads it directly.
+		if has_banner and song_dir ~= banner_song_dir then
+			pending_banner_song = target_song
+			banner_song_dir = song_dir
+		end
+		song_banner:visible(has_banner)
+	end
+	if fallback_banner then
+		fallback_banner:visible(not has_banner)
+	end
 
 	local subtitle = target_song:GetDisplaySubTitle() or ""
 	local title = target_song:GetDisplayMainTitle() or ""
@@ -1151,6 +1177,16 @@ local t = Def.ActorFrame{
 		self:SetUpdateFunction(function(actor)
 			local now = GetTimeSinceStart()
 
+			if pending_banner_song then
+				local banner_frame = actor:GetChild("LoadedContent") and actor:GetChild("LoadedContent"):GetChild("BannerFrame")
+				local song_banner = banner_frame and banner_frame:GetChild("SongBanner")
+				if song_banner then
+					song_banner:LoadFromSong(pending_banner_song):animate(false)
+					song_banner:scaletoclipped(banner_width, banner_height)
+				end
+				pending_banner_song = nil
+			end
+
 			if current_request and (now - current_request_started_at) >= queue_timeout_seconds then
 				current_request:Cancel()
 				current_request = nil
@@ -1207,6 +1243,7 @@ local t = Def.ActorFrame{
 	Def.ActorFrame{
 		Name="LoadedContent",
 		Def.ActorFrame{
+			Name="BannerFrame",
 			InitCommand=function(self)
 				if IsUsingWideScreen() then
 					self:zoom(0.7655):xy(_screen.cx - 170, 96)
@@ -1220,6 +1257,16 @@ local t = Def.ActorFrame{
 				Texture=GetFallbackBanner(),
 				InitCommand=function(self)
 					self:setsize(banner_width, banner_height)
+				end
+			},
+
+			-- Real song banner. Def.Banner (not Def.Sprite/LoadBanner) is required here:
+			-- it's the actor class the engine expects for arbitrary-source-size banner
+			-- decoding/scaling, same as ScreenEvaluation and ScreenSelectMusic use.
+			Def.Banner{
+				Name="SongBanner",
+				InitCommand=function(self)
+					self:setsize(banner_width, banner_height):visible(false)
 				end
 			},
 		},
