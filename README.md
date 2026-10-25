@@ -38,6 +38,11 @@ You can download the current Simply Love release at the [Latest Release](https:/
 Full install instructions are in the [Installing Simply Love](./Other/Documentation/InstallingSimplyLove-README.md) README.
 
 
+## Server Song Loader
+
+Before starting ITGmania, run `python3 Tools/serversongloader/serversongloader.py` to sync this machine's `ServerSongs/` folder with the stepmania-server song library (one-time setup: copy `serversongloader.example.ini` to `serversongloader.ini` and set `InstallDir`; see [docs/server-song-loader.md](./docs/server-song-loader.md)).
+
+
 ## Language Support
 
 Simply Love has support for:

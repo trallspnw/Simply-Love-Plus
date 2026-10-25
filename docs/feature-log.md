@@ -11,6 +11,12 @@ Tracks fork-specific features and improvements added beyond upstream Simply Love
 
 ## Entries
 
+### 2026-10-25
+- Feature: Server song loader
+- Area: `Tools/serversongloader/`, `README.md`, `.gitignore`
+- Summary: Added a standalone Python script that mirrors the stepmania-server song library into `ServerSongs/` (loaded through `AdditionalSongFoldersReadOnly`) before ITGmania starts, so clients no longer need hand-copied songs.
+- Notes: Checksum-driven, one request when nothing changed; deletes songs the server dropped; `--verify` repairs local edits. See `docs/server-song-loader.md`.
+
 ### 2026-03-28
 - Feature: Queue media planning note
 - Area: `docs/server-queue-media-plan.md`, `KNOWLEDGE_INDEX.md`
