@@ -26,28 +26,12 @@ Use this file as the default working guide for future agent sessions in this rep
 - Preserve naming conventions and existing screen structure to avoid broken metric links.
 - Avoid global pollution in Lua; prefer local tables/functions unless intentional shared state.
 
-## Knowledge Management System
-This repo uses a lightweight persistent knowledge system:
+## Docs
+- `README.md`: upstream Simply Love readme, plus a **This fork** section at the top.
+- `docs/server-mode.md`: the fork's Server play mode (setup, flow, code map).
+- `docs/server-song-loader.md`: the song loader script.
 
-- Root index: `KNOWLEDGE_INDEX.md`
-- Durable detail docs: `docs/`
-
-### Workflow
-1. Put session-stable, reusable knowledge in `docs/*.md`.
-2. Add/update a link entry in `KNOWLEDGE_INDEX.md`.
-3. Keep index summaries short; keep depth in the specific doc.
-4. Update `Last Updated` in the index row when touching a doc.
-5. For fork enhancements vs upstream behavior, append an entry to `docs/feature-log.md`.
-
-### What Belongs In `docs/`
-- Architecture notes that help future edits.
-- Decisions/tradeoffs specific to this fork.
-- Engine/theme quirks discovered while debugging.
-- Feature specs and integration notes that must persist.
-
-### What Does Not Belong In `docs/`
-- Ephemeral one-off scratch notes.
-- Verbose command logs that are not reusable.
+Docs describe current behavior. Change history belongs in commits and PRs, not in `docs/`.
 
 ## Editing Safety
 - Make small, targeted changes and keep behavior compatible unless intentionally changing flow.
@@ -56,8 +40,7 @@ This repo uses a lightweight persistent knowledge system:
 - If touching assets referenced by `.redir`, verify path/name consistency.
 
 ## First Reads For New Sessions
-1. `KNOWLEDGE_INDEX.md`
-2. `docs/project-structure.md`
-3. `Scripts/SL_Init.lua`
-4. `Scripts/99 SL-ThemePrefs.lua`
-5. `metrics.ini`
+1. `docs/server-mode.md`
+2. `Scripts/SL_Init.lua`
+3. `Scripts/99 SL-ThemePrefs.lua`
+4. `metrics.ini`

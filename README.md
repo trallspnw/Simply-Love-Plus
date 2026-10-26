@@ -3,6 +3,14 @@
 ![Arrow Logo](https://i.imgur.com/oZmxyGo.png)
 
 
+## This fork
+
+A personal fork of Simply Love that adds a **Server** play mode for use with [stepmania-server](https://github.com/trallspnw/stepmania-server): friends queue songs from their phones, and the machine plays them in turn and reports the scores. See [docs/server-mode.md](./docs/server-mode.md).
+
+- **Song loader:** before starting ITGmania, run `python3 Tools/serversongloader/serversongloader.py` to sync the server's song library into this machine's `ServerSongs/` folder. One-time setup: copy `serversongloader.example.ini` to `serversongloader.ini` and set `InstallDir`. See [docs/server-song-loader.md](./docs/server-song-loader.md).
+- Song select also shows each difficulty's name next to its meter.
+
+
 ## About
 
 Simply Love is an ITGmania theme for the post-ITG community.
@@ -36,11 +44,6 @@ If you are upgrading from a previous version of Simply Love, fully delete the ol
 You can download the current Simply Love release at the [Latest Release](https://github.com/Simply-Love/Simply-Love-SM5/releases/latest) page.
 
 Full install instructions are in the [Installing Simply Love](./Other/Documentation/InstallingSimplyLove-README.md) README.
-
-
-## Server Song Loader
-
-Before starting ITGmania, run `python3 Tools/serversongloader/serversongloader.py` to sync this machine's `ServerSongs/` folder with the stepmania-server song library (one-time setup: copy `serversongloader.example.ini` to `serversongloader.ini` and set `InstallDir`; see [docs/server-song-loader.md](./docs/server-song-loader.md)).
 
 
 ## Language Support
