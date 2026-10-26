@@ -1,7 +1,7 @@
 # Server Song Loader
 
 ## Scope
-`Tools/serversongloader/serversongloader.py`: syncs a machine's server songs from stepmania-server, then exits. Linux only, Python 3 standard library only. The overall design is the wiki's **Song Sync** doc (Side Projects → StepMania Server).
+`Tools/serversongloader/serversongloader.py`: syncs a machine's server songs from stepmania-server, then exits. Linux only, Python 3 standard library only. It runs outside the theme because theme Lua can't delete files or start processes, and ITGmania loads songs only at startup.
 
 ## Usage
 Run it before starting ITGmania, never while ITGmania is running:
