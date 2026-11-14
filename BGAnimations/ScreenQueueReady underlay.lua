@@ -1,3 +1,7 @@
+-- Server Mode ready screen: shows the current song from StepMania Server's queue,
+-- lets each player on the cabinet (P1, and P2 when someone joined from the web
+-- queue) pick a difficulty on their own pad, and starts the song.
+
 local CURRENT_ENDPOINT = "/api/game/song/current"
 local START_ENDPOINT = "/api/game/song/start"
 local SKIP_ENDPOINT = "/api/game/song/skip"
@@ -42,9 +46,11 @@ local modal_options = {}
 local modal_index = 1
 local pending_action = nil
 local input
-local last_diff_direction = nil
-local last_diff_press_at = -1
+local difficulty_taps = {}
 local diff_double_press_window = 0.45
+-- The player who joined the queued song from the web queue (side 2), or nil:
+-- their name, their chart options (with their own records) and their selection.
+local side_two = nil
 local play_song_preview
 local stop_song_preview
 
@@ -242,6 +248,7 @@ local clear_queue_context = function()
 	target_song = nil
 	available_chart_options = {}
 	selected_index = 1
+	side_two = nil
 	preview_song_dir = ""
 	banner_song_dir = ""
 	pending_banner_song = nil
@@ -335,8 +342,13 @@ local apply_selected_chart = function()
 
 	GAMESTATE:SetCurrentSong(target_song)
 	for pn in ivalues(GAMESTATE:GetHumanPlayers()) do
-		GAMESTATE:SetCurrentSteps(pn, steps)
-		GAMESTATE:SetPreferredDifficulty(pn, steps:GetDifficulty())
+		local player_steps = steps
+		if pn == PLAYER_2 and side_two then
+			local side_two_option = side_two.options[side_two.selected_index]
+			player_steps = side_two_option and side_two_option.steps or steps
+		end
+		GAMESTATE:SetCurrentSteps(pn, player_steps)
+		GAMESTATE:SetPreferredDifficulty(pn, player_steps:GetDifficulty())
 	end
 
 	current_chart_id = get_selected_chart_id()
@@ -502,28 +514,39 @@ local difficulty_note_for_selection = function()
 	return ""
 end
 
-local try_change_difficulty = function(direction)
-	if #available_chart_options <= 1 then return false end
-
+-- A difficulty change takes a double tap of Up or Down on the player's own pad.
+local is_difficulty_double_tap = function(pn, direction)
 	local now = GetTimeSinceStart()
-	local same_direction = (last_diff_direction == direction)
-	local within_window = last_diff_press_at > 0 and (now - last_diff_press_at) <= diff_double_press_window
+	local last_tap = difficulty_taps[pn]
+	local is_double_tap = last_tap ~= nil
+		and last_tap.direction == direction
+		and (now - last_tap.at) <= diff_double_press_window
 
-	last_diff_direction = direction
-	last_diff_press_at = now
+	difficulty_taps[pn] = (not is_double_tap) and { direction = direction, at = now } or nil
+	return is_double_tap
+end
 
-	if not (same_direction and within_window) then
-		return false
-	end
-
+local step_chart_index = function(index, option_count, direction)
 	if direction == "up" then
-		selected_index = ((selected_index - 2) % #available_chart_options) + 1
-	else
-		selected_index = (selected_index % #available_chart_options) + 1
+		return ((index - 2) % option_count) + 1
 	end
+	return (index % option_count) + 1
+end
 
-	last_diff_direction = nil
-	last_diff_press_at = -1
+-- Changes the difficulty of the side whose pad was pressed. Input from P2's
+-- pad does nothing unless someone joined as P2.
+local try_change_difficulty = function(pn, direction)
+	local is_side_two = (pn == PLAYER_2)
+	if is_side_two and not side_two then return false end
+
+	local option_count = is_side_two and #side_two.options or #available_chart_options
+	if option_count <= 1 or not is_difficulty_double_tap(pn, direction) then return false end
+
+	if is_side_two then
+		side_two.selected_index = step_chart_index(side_two.selected_index, option_count, direction)
+	else
+		selected_index = step_chart_index(selected_index, option_count, direction)
+	end
 	return true
 end
 
@@ -676,14 +699,24 @@ local update_view = function(frame)
 		title = title .. "\n" .. subtitle
 	end
 
+	local player_one_name = queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer")
 	if user_text then
-		user_text:settext(queued_player_name ~= "" and queued_player_name or THEME:GetString("ScreenQueueReady", "NoPlayer"))
+		user_text:settext(side_two and ("%s  &  %s"):format(player_one_name, side_two.player_name) or player_one_name)
 	end
 	if song_text then song_text:settext(title) end
 	if artist_text then artist_text:settext(target_song:GetDisplayArtist() or "") end
 	if detail_strip then update_song_detail_strip(detail_strip) end
 	if player_score_value then
-		player_score_value:settext("Personal Record: " .. format_high_score(queued_user_highscore))
+		if side_two then
+			local side_two_option = side_two.options[side_two.selected_index]
+			player_score_value:settext(("%s (%s): %s  •  %s (%s): %s"):format(
+				player_one_name, get_selected_difficulty_name(), format_high_score(queued_user_highscore),
+				side_two.player_name, side_two_option and side_two_option.difficulty_name or "",
+				format_high_score(side_two_option and side_two_option.user_highscore)
+			))
+		else
+			player_score_value:settext("Personal Record: " .. format_high_score(queued_user_highscore))
+		end
 	end
 	if machine_score_value then
 		machine_score_value:settext("Machine Record: " .. format_high_score(queued_server_highscore))
@@ -837,6 +870,86 @@ local handle_queue_request_failure = function(frame, detail)
 	frame:playcommand("Refresh")
 end
 
+local find_side = function(body, side)
+	if type(body) ~= "table" or type(body.players) ~= "table" then return nil end
+
+	for _, player in ipairs(body.players) do
+		if type(player) == "table" and tonumber(player.side) == side then
+			return player
+		end
+	end
+
+	return nil
+end
+
+-- Identifies a join: the same player rejoining on another chart counts as a new join.
+local side_two_key = function(player)
+	return ("%s:%s"):format(tostring(player.player.id), tostring(player.chart_id))
+end
+
+local leave_side_two = function()
+	side_two = nil
+	difficulty_taps[PLAYER_2] = nil
+
+	if GAMESTATE:IsHumanPlayer(PLAYER_2) then
+		GAMESTATE:UnjoinPlayer(PLAYER_2)
+		GAMESTATE:SetCurrentStyle("single")
+	end
+end
+
+local join_side_two = function(player)
+	local options = build_chart_options(target_song, player.chart_highscores)
+	if #options == 0 then
+		leave_side_two()
+		return
+	end
+
+	side_two = {
+		key = side_two_key(player),
+		player_name = get_player_name(player.player),
+		options = options,
+		selected_index = find_initial_chart_index(options, player, player.user_highscore, player.server_highscore),
+	}
+
+	if not GAMESTATE:IsHumanPlayer(PLAYER_2) then
+		GAMESTATE:JoinPlayer(PLAYER_2)
+	end
+	GAMESTATE:SetCurrentStyle("versus")
+end
+
+-- Matches the cabinet's P2 to the server's side 2: joins P2 when someone joined
+-- the song from the web queue and drops P2 when they left. The players are
+-- fixed once a start request is in flight. Returns true when side 2 changed.
+local sync_side_two = function(body)
+	if pending_action ~= nil or not target_song then return false end
+
+	local player = find_side(body, 2)
+	if player and type(player.player) == "table" then
+		if side_two and side_two.key == side_two_key(player) then return false end
+		join_side_two(player)
+		return true
+	end
+
+	if side_two or GAMESTATE:IsHumanPlayer(PLAYER_2) then
+		leave_side_two()
+		return true
+	end
+
+	return false
+end
+
+-- The sides on the cabinet with their selected charts, for the start request.
+local get_start_players = function()
+	local players = { { side = 1, chart_id = get_selected_chart_id() } }
+	local side_two_option = side_two and side_two.options[side_two.selected_index]
+
+	if side_two_option and side_two_option.chart_id then
+		players[2] = { side = 2, chart_id = side_two_option.chart_id }
+	end
+
+	return players
+end
+
 process_current_body = function(frame, body, force_apply)
 	local context = queue_context_from_body(body)
 	if not context then
@@ -858,6 +971,9 @@ process_current_body = function(frame, body, force_apply)
 
 	local queue_item_id = context.queue_item_id
 	if not force_apply and current_queue_item_id ~= nil and queue_item_id == current_queue_item_id then
+		if sync_side_two(body) then
+			apply_selected_chart()
+		end
 		close_modal()
 		schedule_queue_poll()
 		frame:playcommand("Refresh")
@@ -888,6 +1004,8 @@ process_current_body = function(frame, body, force_apply)
 	queued_chart_highscores = type(body.chart_highscores) == "table" and body.chart_highscores or nil
 	SL.Global.ServerQueueItemId = current_queue_item_id
 	SL.Global.ServerQueueCurrent = body
+	side_two = nil
+	sync_side_two(body)
 	apply_selected_chart()
 	update_highscores_for_selected_difficulty()
 	set_queue_ready()
@@ -946,6 +1064,7 @@ local request_start = function(frame)
 
 	local request_body = BuildStepManiaServerSongRequestBody({
 		chart_id = get_selected_chart_id(),
+		players = side_two and get_start_players() or nil,
 	})
 
 	local request, error_detail = build_server_request(START_ENDPOINT, "POST", request_body, function(response)
@@ -955,6 +1074,12 @@ local request_start = function(frame)
 			pending_action = nil
 			action_error_to_screen(frame, get_response_error_detail(response, body))
 			return
+		end
+
+		-- The server drops side 2 if its player left just before this start.
+		if side_two and not find_side(body, 2) then
+			leave_side_two()
+			apply_selected_chart()
 		end
 
 		SL.Global.ServerQueueStartBaseline = {
@@ -1117,14 +1242,14 @@ input = function(event)
 		return true
 	end
 
-	if event.GameButton == "MenuUp" and try_change_difficulty("up") then
+	if event.GameButton == "MenuUp" and try_change_difficulty(event.PlayerNumber, "up") then
 		apply_selected_chart()
 		update_highscores_for_selected_difficulty()
 		top_screen:GetChild("Underlay"):playcommand("Refresh")
 		return true
 	end
 
-	if event.GameButton == "MenuDown" and try_change_difficulty("down") then
+	if event.GameButton == "MenuDown" and try_change_difficulty(event.PlayerNumber, "down") then
 		apply_selected_chart()
 		update_highscores_for_selected_difficulty()
 		top_screen:GetChild("Underlay"):playcommand("Refresh")
