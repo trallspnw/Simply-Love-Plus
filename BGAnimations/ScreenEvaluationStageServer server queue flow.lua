@@ -26,6 +26,13 @@ local finish_detail = ""
 local menu_index = 1
 local pre_play = SL.Global.ServerQueueStartBaseline or {}
 local post_play = SL.Global.ServerQueueFinishResult or nil
+-- P2 played if the server started the song with side 2 (the start baseline
+-- has it) and P2 is still joined. Side 1 is the master player (P1).
+local side_two_baseline = pre_play.side_two
+local side_two_played = side_two_baseline ~= nil and GAMESTATE:IsHumanPlayer(PLAYER_2)
+local side_two_stats = side_two_played and STATSMAN:GetCurStageStats():GetPlayerStageStats(PLAYER_2) or nil
+local side_two_score = side_two_stats and GetStepManiaServerScoreFromPercentDP(side_two_stats:GetPercentDancePoints()) or nil
+local side_two_grade = side_two_stats and GetStepManiaServerGradeString(side_two_stats:GetGrade()) or nil
 local next_queue_label = ""
 local input
 local input_ready_at = -1
@@ -161,6 +168,54 @@ local did_beat_baseline = function(baseline, new_score)
 	if not score_value then return false end
 	if baseline_score == nil then return true end
 	return score_value > baseline_score
+end
+
+-- One side's entry in a finish response's per-side `results`.
+local find_side_result = function(body, side)
+	if type(body) ~= "table" or type(body.results) ~= "table" then return nil end
+
+	for _, result in ipairs(body.results) do
+		if type(result) == "table" and tonumber(result.side) == side then
+			return result
+		end
+	end
+
+	return nil
+end
+
+-- The record lines one player's server results page shows (Panes/PaneServer):
+-- how their score compares with their records from before the play, and their
+-- records after it once the server has answered.
+local get_record_lines = function(pn, score, before_play, after_play)
+	local records = { player = pn, primary = "", secondary = "" }
+	if failed or not (finish_status == "submitting" or finish_status == "results") then
+		return records
+	end
+
+	before_play = before_play or {}
+	local server_pr = did_beat_baseline(before_play.server_highscore, score)
+	local personal_pr = did_beat_baseline(before_play.user_highscore, score)
+	local latest_user = (after_play and after_play.user_highscore) or before_play.user_highscore
+	local latest_server = (after_play and after_play.server_highscore) or before_play.server_highscore
+
+	if finish_status == "submitting" then
+		records.primary = THEME:GetString("ScreenEvaluation", "ServerSubmitting")
+		records.primary_zoom = 0.4
+	elseif server_pr then
+		records.primary = "Server Record!"
+		records.primary_color = "#f5d36a"
+		records.primary_zoom = 0.7
+	elseif personal_pr then
+		records.primary = "Personal Record!"
+		records.primary_color = "#d8dde6"
+		records.primary_zoom = 0.55
+		records.secondary = "Machine Record: " .. format_score_only(latest_server)
+	else
+		records.primary = "Personal Record: " .. format_score_only(latest_user)
+		records.secondary = "Machine Record: " .. format_score_only(latest_server)
+	end
+
+	return records
 end
 
 local update_next_queue_label = function(body)
@@ -305,11 +360,21 @@ local request_finish = function()
 
 	if finish_request then finish_request:Cancel(); finish_request = nil end
 
-	local body = BuildStepManiaServerSongRequestBody({
-		chart_id = current_chart_id,
-		score = current_score,
-		grade = current_grade,
-	})
+	local body
+	if side_two_played then
+		body = BuildStepManiaServerSongRequestBody({
+			results = {
+				{ side = 1, chart_id = current_chart_id, score = current_score, grade = current_grade },
+				{ side = 2, chart_id = side_two_baseline.chart_id, score = side_two_score, grade = side_two_grade },
+			},
+		})
+	else
+		body = BuildStepManiaServerSongRequestBody({
+			chart_id = current_chart_id,
+			score = current_score,
+			grade = current_grade,
+		})
+	end
 
 	local request, _ = build_server_request(FINISH_ENDPOINT, "POST", body, function(response)
 		finish_request = nil
@@ -555,32 +620,14 @@ local af = Def.ActorFrame{
 
 		local show_menu = (finish_status == "menu")
 		if fail_menu then fail_menu:visible(show_menu) end
-		-- The record lines for the server results page (Panes/PaneServer).
-		local records = { player = master_player, primary = "", secondary = "" }
-		if not failed and (finish_status == "submitting" or finish_status == "results") then
-			local server_pr = did_beat_baseline(pre_play.server_highscore, current_score)
-			local personal_pr = did_beat_baseline(pre_play.user_highscore, current_score)
-			local latest_user = (post_play and post_play.user_highscore) or pre_play.user_highscore
-			local latest_server = (post_play and post_play.server_highscore) or pre_play.server_highscore
-
-			if finish_status == "submitting" then
-				records.primary = THEME:GetString("ScreenEvaluation", "ServerSubmitting")
-				records.primary_zoom = 0.4
-			elseif server_pr then
-				records.primary = "Server Record!"
-				records.primary_color = "#f5d36a"
-				records.primary_zoom = 0.7
-			elseif personal_pr then
-				records.primary = "Personal Record!"
-				records.primary_color = "#d8dde6"
-				records.primary_zoom = 0.55
-				records.secondary = "Machine Record: " .. format_score_only(latest_server)
-			else
-				records.primary = "Personal Record: " .. format_score_only(latest_user)
-				records.secondary = "Machine Record: " .. format_score_only(latest_server)
-			end
+		-- The record lines for each player's server results page (Panes/PaneServer).
+		MESSAGEMAN:Broadcast("ServerQueueResultsChanged", get_record_lines(master_player, current_score, pre_play, post_play))
+		if side_two_played then
+			MESSAGEMAN:Broadcast(
+				"ServerQueueResultsChanged",
+				get_record_lines(PLAYER_2, side_two_score, side_two_baseline, find_side_result(post_play, 2))
+			)
 		end
-		MESSAGEMAN:Broadcast("ServerQueueResultsChanged", records)
 
 		-- fail menu option highlighting
 		if show_menu and fail_menu then
