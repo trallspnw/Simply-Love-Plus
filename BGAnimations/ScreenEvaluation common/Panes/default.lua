@@ -1,6 +1,15 @@
 local NumPanes = ...
 local players = GAMESTATE:GetHumanPlayers()
 
+-- In Server Mode the last pane is the server results page. It's added at the end
+-- so the numbered panes keep their numbers: other files look them up by name.
+local get_pane_path = function(i)
+	if SL.Global.ServerModeActive and i == NumPanes then
+		return "./PaneServer"
+	end
+	return "./Pane"..i
+end
+
 local af = Def.ActorFrame{}
 af.Name="Panes"
 
@@ -18,7 +27,7 @@ if #players == 2 or SL.Global.GameMode=="Casual" then
 		-- add Panes for this player to the ActorFrame using a simple, numerical for-loop
 		for i=1, NumPanes do
 			local pn   = ToEnumShortString(player)
-			local pane = LoadActor("./Pane"..i, {player, player})
+			local pane = LoadActor(get_pane_path(i), {player, player})
 
 			if pane then
 				af[#af+1] = Def.ActorFrame{
@@ -54,8 +63,8 @@ elseif #players == 1 then
 	local mpn = GAMESTATE:GetMasterPlayerNumber()
 
 	for i=1, NumPanes do
-		local left_pane  = LoadActor("./Pane"..i, {mpn, PLAYER_1, ComputedData})
-		local right_pane = LoadActor("./Pane"..i, {mpn, PLAYER_2, ComputedData})
+		local left_pane  = LoadActor(get_pane_path(i), {mpn, PLAYER_1, ComputedData})
+		local right_pane = LoadActor(get_pane_path(i), {mpn, PLAYER_2, ComputedData})
 
 		-- These need to be wrapped in an extra AF to offset left and right.
 		-- Panes can be nil, however, so don't add extra AFs with nil children

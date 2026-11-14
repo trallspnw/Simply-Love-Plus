@@ -30,16 +30,6 @@ local next_queue_label = ""
 local input
 local input_ready_at = -1
 
-local banner_width = 418 * 0.7
-local panel_w = IsUsingWideScreen() and 250 or 168
-local panel_h = IsUsingWideScreen() and 136 or 126
-local panel_gap = IsUsingWideScreen() and 16 or 8
-local panel_x = _screen.cx + (banner_width * 0.5) + panel_gap + (panel_w * 0.5)
-local panel_y = 108
-local panel_left = panel_x - (panel_w * 0.5) + 12
-local panel_top = panel_y - (panel_h * 0.5)
-local panel_text_w = IsUsingWideScreen() and 300 or 220
-
 local clear_server_session_state = function()
 	SL.Global.ServerModeActive = false
 	SL.Global.ServerQueueItemId = nil
@@ -241,41 +231,48 @@ local get_side_key_for_event = function(event)
 	return "P1"
 end
 
-local find_visible_pane_index = function(panes_actor, side_key, max_panes)
-	for i = 1, max_panes do
-		local pane = panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key))
-		if pane and pane:GetVisible() then
-			return i
+-- The pane numbers loaded on one side, in order. Some numbered panes are
+-- skipped (nil) depending on preferences, so the numbers can have gaps.
+local get_side_pane_numbers = function(panes_actor, side_key)
+	local numbers = {}
+	for i = 1, 12 do
+		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)) then
+			numbers[#numbers+1] = i
+		end
+	end
+	return numbers
+end
+
+local find_visible_position = function(panes_actor, side_key, numbers)
+	for position, i in ipairs(numbers) do
+		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)):GetVisible() then
+			return position
 		end
 	end
 	return nil
 end
 
+-- Pages one side of the results through its loaded panes. In single, both
+-- halves show panes for the same player, so the page the other half shows is skipped.
 local switch_eval_pane = function(event, delta)
 	local panes_actor = get_eval_panes_actor()
 	if not panes_actor then return false end
 
 	local side_key = get_side_key_for_event(event)
-	local max_panes = 0
-	for i = 1, 12 do
-		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)) then
-			max_panes = i
-		end
-	end
-	if max_panes <= 1 then return false end
+	local numbers = get_side_pane_numbers(panes_actor, side_key)
+	if #numbers <= 1 then return false end
 
-	local active_index = find_visible_pane_index(panes_actor, side_key, max_panes) or 1
 	local other_side_key = (side_key == "P1") and "P2" or "P1"
-	local other_active_index = find_visible_pane_index(panes_actor, other_side_key, max_panes)
+	local active_position = find_visible_position(panes_actor, side_key, numbers) or 1
+	local other_position = find_visible_position(panes_actor, other_side_key, get_side_pane_numbers(panes_actor, other_side_key))
 
-	local next_index = ((active_index - 1 + delta) % max_panes) + 1
-	if #GAMESTATE:GetHumanPlayers() == 1 and other_active_index and next_index == other_active_index and max_panes > 1 then
-		next_index = ((next_index - 1 + delta) % max_panes) + 1
+	local next_position = ((active_position - 1 + delta) % #numbers) + 1
+	if #GAMESTATE:GetHumanPlayers() == 1 and next_position == other_position then
+		next_position = ((next_position - 1 + delta) % #numbers) + 1
 	end
 
-	for i = 1, max_panes do
-		local pane = panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key))
-		if pane then pane:visible(i == next_index) end
+	for position, i in ipairs(numbers) do
+		panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)):visible(position == next_position)
 	end
 
 	return true
@@ -467,6 +464,14 @@ input = function(event)
 		return true
 	end
 
+	if event.GameButton == "MenuLeft" then
+		return switch_eval_pane(event, -1) or true
+	end
+
+	if event.GameButton == "MenuRight" then
+		return switch_eval_pane(event, 1) or true
+	end
+
 	if finish_status == "submitting" then
 		return true
 	end
@@ -546,47 +551,36 @@ local af = Def.ActorFrame{
 	end,
 
 	RefreshServerQueueFlowCommand=function(self)
-		local results_panel = self:GetChild("ResultsPanel")
 		local fail_menu = self:GetChild("FailMenu")
 
 		local show_menu = (finish_status == "menu")
 		if fail_menu then fail_menu:visible(show_menu) end
-		if results_panel then
-			results_panel:visible(not failed and (finish_status == "submitting" or finish_status == "results"))
-
-			local primary = results_panel:GetChild("PrimaryMessage")
-			local secondary = results_panel:GetChild("SecondaryMessage")
-			local tertiary = results_panel:GetChild("TertiaryMessage")
-
+		-- The record lines for the server results page (Panes/PaneServer).
+		local records = { player = master_player, primary = "", secondary = "" }
+		if not failed and (finish_status == "submitting" or finish_status == "results") then
 			local server_pr = did_beat_baseline(pre_play.server_highscore, current_score)
 			local personal_pr = did_beat_baseline(pre_play.user_highscore, current_score)
 			local latest_user = (post_play and post_play.user_highscore) or pre_play.user_highscore
 			local latest_server = (post_play and post_play.server_highscore) or pre_play.server_highscore
 
 			if finish_status == "submitting" then
-				primary:settext(THEME:GetString("ScreenEvaluation", "ServerSubmitting"))
-				primary:diffuse(color("#d8d8d8")):zoom(0.36)
-				secondary:settext("")
-				tertiary:settext("")
+				records.primary = THEME:GetString("ScreenEvaluation", "ServerSubmitting")
+				records.primary_zoom = 0.4
 			elseif server_pr then
-				primary:settext("Server Record!")
-				primary:diffuse(color("#f5d36a")):zoom(0.62)
-				secondary:settext("")
-				tertiary:settext("")
+				records.primary = "Server Record!"
+				records.primary_color = "#f5d36a"
+				records.primary_zoom = 0.7
 			elseif personal_pr then
-				primary:settext("Personal Record!")
-				primary:diffuse(color("#d8dde6")):zoom(0.44)
-				secondary:settext("Machine Record: " .. format_score_only(latest_server))
-				secondary:zoom(0.44)
-				tertiary:settext("")
+				records.primary = "Personal Record!"
+				records.primary_color = "#d8dde6"
+				records.primary_zoom = 0.55
+				records.secondary = "Machine Record: " .. format_score_only(latest_server)
 			else
-				primary:settext("Personal Record: " .. format_score_only(latest_user))
-				primary:diffuse(color("#d8d8d8")):zoom(0.34)
-				secondary:settext("Machine Record: " .. format_score_only(latest_server))
-				secondary:zoom(0.32)
-				tertiary:settext("")
+				records.primary = "Personal Record: " .. format_score_only(latest_user)
+				records.secondary = "Machine Record: " .. format_score_only(latest_server)
 			end
 		end
+		MESSAGEMAN:Broadcast("ServerQueueResultsChanged", records)
 
 		-- fail menu option highlighting
 		if show_menu and fail_menu then
@@ -600,51 +594,6 @@ local af = Def.ActorFrame{
 			end
 		end
 	end,
-
-	-- -----------------------------------------------------------------------
-	-- Results panel (shown for submitting and results states)
-	Def.ActorFrame{
-		Name="ResultsPanel",
-		InitCommand=function(self) self:visible(false) end,
-
-		Def.Quad{
-			InitCommand=function(self)
-				self:xy(panel_x, panel_y)
-					:zoomto(panel_w, panel_h)
-					:diffuse(color("#000000")):diffusealpha(0.72)
-			end
-		},
-
-		LoadFont("Common Bold")..{
-			Name="PrimaryMessage",
-			InitCommand=function(self)
-				self:xy(panel_x, panel_y - 12)
-					:zoom(0.56)
-					:maxwidth(panel_w * 1.45)
-					:vertalign(0.5)
-			end
-		},
-		LoadFont("Common Bold")..{
-			Name="SecondaryMessage",
-			InitCommand=function(self)
-				self:xy(panel_x, panel_y + 18)
-					:zoom(0.44)
-					:maxwidth(panel_w * 1.7)
-					:diffuse(color("#d8d8d8"))
-					:vertalign(0.5)
-			end
-		},
-		LoadFont("Common Normal")..{
-			Name="TertiaryMessage",
-			InitCommand=function(self)
-				self:xy(panel_x, panel_y + 40)
-					:zoom(0.30)
-					:maxwidth(panel_w * 1.7)
-					:diffuse(color("#c7d2fe"))
-					:vertalign(0.5)
-			end
-		},
-	},
 
 	-- -----------------------------------------------------------------------
 	-- Fail menu (shown only on failure)
