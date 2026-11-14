@@ -25,6 +25,12 @@ local mpn = GAMESTATE:GetMasterPlayerNumber()
 local primary_i   = clamp(SL[ToEnumShortString(mpn)].EvalPanePrimary,   1, num_panes)
 local secondary_i = clamp(SL[ToEnumShortString(mpn)].EvalPaneSecondary, 1, num_panes)
 
+-- Server Mode opens on the server results page (the last pane); in single, the
+-- other side shows the score and judgments page.
+if SL.Global.ServerModeActive then
+	primary_i, secondary_i = num_panes, 1
+end
+
 -- -----------------------------------------------------------------------
 -- initialize local tables (panes, active_pane) for the the input handling function to use
 
@@ -63,13 +69,22 @@ for controller=1,2 do
 			else
 				-- initialize this player's active_pane to their profile's EvalPanePrimary
 				-- will be 1 if no profile/"Guest" profile
-				local p = clamp(SL["P"..controller].EvalPanePrimary, 1, num_panes)
+				local p = SL.Global.ServerModeActive and num_panes or clamp(SL["P"..controller].EvalPanePrimary, 1, num_panes)
 				pane:visible(i == p)
 				active_pane[controller] = p
 			end
 
 		 	table.insert(panes[controller], pane)
 		end
+	end
+end
+
+-- In versus, active_pane above holds pane numbers, which only match positions in
+-- panes[] when no pane was skipped (nil). The server results page is the last
+-- pane, so point each side at its last position.
+if SL.Global.ServerModeActive and #players == 2 then
+	for controller=1,2 do
+		active_pane[controller] = #panes[controller]
 	end
 end
 

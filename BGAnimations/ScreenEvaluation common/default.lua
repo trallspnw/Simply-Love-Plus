@@ -1,5 +1,6 @@
 local Players = GAMESTATE:GetHumanPlayers()
-local NumPanes = SL.Global.GameMode=="Casual" and 1 or 8
+-- Server Mode adds a ninth, last pane: the server results page (Panes/PaneServer).
+local NumPanes = SL.Global.GameMode=="Casual" and 1 or (SL.Global.ServerModeActive and 9 or 8)
 
 local InputHandler = nil
 local EventOverlayInputHandler = nil
