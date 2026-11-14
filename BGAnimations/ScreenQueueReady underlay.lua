@@ -241,6 +241,16 @@ local get_response_error_detail = function(response, body)
 	return THEME:GetString("ScreenQueueReady", "RequestFailed")
 end
 
+local leave_side_two = function()
+	side_two = nil
+	difficulty_taps[PLAYER_2] = nil
+
+	if GAMESTATE:IsHumanPlayer(PLAYER_2) then
+		GAMESTATE:UnjoinPlayer(PLAYER_2)
+		GAMESTATE:SetCurrentStyle("single")
+	end
+end
+
 local clear_queue_context = function()
 	if SOUND and SOUND.StopMusic then
 		pcall(function() SOUND:StopMusic() end)
@@ -248,7 +258,7 @@ local clear_queue_context = function()
 	target_song = nil
 	available_chart_options = {}
 	selected_index = 1
-	side_two = nil
+	leave_side_two()
 	preview_song_dir = ""
 	banner_song_dir = ""
 	pending_banner_song = nil
@@ -887,16 +897,6 @@ local side_two_key = function(player)
 	return ("%s:%s"):format(tostring(player.player.id), tostring(player.chart_id))
 end
 
-local leave_side_two = function()
-	side_two = nil
-	difficulty_taps[PLAYER_2] = nil
-
-	if GAMESTATE:IsHumanPlayer(PLAYER_2) then
-		GAMESTATE:UnjoinPlayer(PLAYER_2)
-		GAMESTATE:SetCurrentStyle("single")
-	end
-end
-
 local join_side_two = function(player)
 	local options = build_chart_options(target_song, player.chart_highscores)
 	if #options == 0 then
@@ -1345,6 +1345,9 @@ local t = Def.ActorFrame{
 
 		if type(SL.Global.ServerQueuePrefetch) == "table" then
 			process_current_body(self, SL.Global.ServerQueuePrefetch, true)
+			-- The prefetched response can be a few seconds old, so the players
+			-- may have changed since; fetch them now rather than at the next poll.
+			request_current(self, false, false)
 		else
 			request_current(self, true, true)
 		end
