@@ -1082,11 +1082,19 @@ local request_start = function(frame)
 			apply_selected_chart()
 		end
 
+		-- Records before this play, for the results screen to compare against:
+		-- side 1 at the top level, side 2 (P2) when the server started it.
+		local side_two_start = find_side(body, 2)
 		SL.Global.ServerQueueStartBaseline = {
 			chart_id = request_body.chart_id,
 			difficulty_name = get_selected_difficulty_name(),
 			user_highscore = body and body.user_highscore or nil,
 			server_highscore = body and body.server_highscore or nil,
+			side_two = side_two_start and {
+				chart_id = tonumber(side_two_start.chart_id),
+				user_highscore = side_two_start.user_highscore,
+				server_highscore = side_two_start.server_highscore,
+			} or nil,
 		}
 		SL.Global.ServerQueueFinishResult = nil
 		SL.Global.ServerQueueSelectedChartId = request_body.chart_id
