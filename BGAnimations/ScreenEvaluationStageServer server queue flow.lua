@@ -231,41 +231,48 @@ local get_side_key_for_event = function(event)
 	return "P1"
 end
 
-local find_visible_pane_index = function(panes_actor, side_key, max_panes)
-	for i = 1, max_panes do
-		local pane = panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key))
-		if pane and pane:GetVisible() then
-			return i
+-- The pane numbers loaded on one side, in order. Some numbered panes are
+-- skipped (nil) depending on preferences, so the numbers can have gaps.
+local get_side_pane_numbers = function(panes_actor, side_key)
+	local numbers = {}
+	for i = 1, 12 do
+		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)) then
+			numbers[#numbers+1] = i
+		end
+	end
+	return numbers
+end
+
+local find_visible_position = function(panes_actor, side_key, numbers)
+	for position, i in ipairs(numbers) do
+		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)):GetVisible() then
+			return position
 		end
 	end
 	return nil
 end
 
+-- Pages one side of the results through its loaded panes. In single, both
+-- halves show panes for the same player, so the page the other half shows is skipped.
 local switch_eval_pane = function(event, delta)
 	local panes_actor = get_eval_panes_actor()
 	if not panes_actor then return false end
 
 	local side_key = get_side_key_for_event(event)
-	local max_panes = 0
-	for i = 1, 12 do
-		if panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)) then
-			max_panes = i
-		end
-	end
-	if max_panes <= 1 then return false end
+	local numbers = get_side_pane_numbers(panes_actor, side_key)
+	if #numbers <= 1 then return false end
 
-	local active_index = find_visible_pane_index(panes_actor, side_key, max_panes) or 1
 	local other_side_key = (side_key == "P1") and "P2" or "P1"
-	local other_active_index = find_visible_pane_index(panes_actor, other_side_key, max_panes)
+	local active_position = find_visible_position(panes_actor, side_key, numbers) or 1
+	local other_position = find_visible_position(panes_actor, other_side_key, get_side_pane_numbers(panes_actor, other_side_key))
 
-	local next_index = ((active_index - 1 + delta) % max_panes) + 1
-	if #GAMESTATE:GetHumanPlayers() == 1 and other_active_index and next_index == other_active_index and max_panes > 1 then
-		next_index = ((next_index - 1 + delta) % max_panes) + 1
+	local next_position = ((active_position - 1 + delta) % #numbers) + 1
+	if #GAMESTATE:GetHumanPlayers() == 1 and next_position == other_position then
+		next_position = ((next_position - 1 + delta) % #numbers) + 1
 	end
 
-	for i = 1, max_panes do
-		local pane = panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key))
-		if pane then pane:visible(i == next_index) end
+	for position, i in ipairs(numbers) do
+		panes_actor:GetChild(("Pane%d_Side%s"):format(i, side_key)):visible(position == next_position)
 	end
 
 	return true
@@ -455,6 +462,14 @@ input = function(event)
 		end
 
 		return true
+	end
+
+	if event.GameButton == "MenuLeft" then
+		return switch_eval_pane(event, -1) or true
+	end
+
+	if event.GameButton == "MenuRight" then
+		return switch_eval_pane(event, 1) or true
 	end
 
 	if finish_status == "submitting" then
