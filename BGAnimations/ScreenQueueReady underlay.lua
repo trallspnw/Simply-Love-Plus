@@ -5,6 +5,7 @@
 local CURRENT_ENDPOINT = "/api/game/song/current"
 local START_ENDPOINT = "/api/game/song/start"
 local SKIP_ENDPOINT = "/api/game/song/skip"
+local DROP_ENDPOINT = "/api/game/song/drop"
 
 local banner_width = 418
 local banner_height = 164
@@ -43,6 +44,8 @@ local modal_mode = nil
 local modal_title = ""
 local modal_detail = ""
 local modal_options = {}
+-- What each Back menu option does, in the same order as modal_options.
+local modal_actions = {}
 local modal_index = 1
 local pending_action = nil
 local input
@@ -454,6 +457,7 @@ local close_modal = function()
 	modal_title = ""
 	modal_detail = ""
 	modal_options = {}
+	modal_actions = {}
 	modal_index = 1
 	pending_action = nil
 end
@@ -463,20 +467,33 @@ local open_busy_modal = function(title, detail, action_name)
 	modal_title = title or ""
 	modal_detail = detail or ""
 	modal_options = {}
+	modal_actions = {}
 	modal_index = 1
 	pending_action = action_name
 end
 
-local open_back_menu = function()
+-- The Back menu of the player who pressed Back: P2 (when joined) can only
+-- continue, open song options, or drop out of this song; P1 controls the queue.
+local open_back_menu = function(pn)
 	modal_mode = "menu"
 	modal_title = THEME:GetString("ScreenQueueReady", "BackMenuTitle")
 	modal_detail = THEME:GetString("ScreenQueueReady", "BackMenuDetail")
-	modal_options = {
-		THEME:GetString("ScreenQueueReady", "MenuContinue"),
-		THEME:GetString("ScreenQueueReady", "MenuSongOptions"),
-		THEME:GetString("ScreenQueueReady", "MenuSkip"),
-		THEME:GetString("ScreenQueueReady", "MenuExit"),
+	if pn == PLAYER_2 and side_two then
+		modal_actions = { "continue", "song_options", "drop_out" }
+	else
+		modal_actions = { "continue", "song_options", "skip", "exit" }
+	end
+	local labels = {
+		continue = THEME:GetString("ScreenQueueReady", "MenuContinue"),
+		song_options = THEME:GetString("ScreenQueueReady", "MenuSongOptions"),
+		skip = THEME:GetString("ScreenQueueReady", "MenuSkip"),
+		exit = THEME:GetString("ScreenQueueReady", "MenuExit"),
+		drop_out = THEME:GetString("ScreenQueueReady", "MenuDropOut"),
 	}
+	modal_options = {}
+	for _, action in ipairs(modal_actions) do
+		modal_options[#modal_options+1] = labels[action]
+	end
 	modal_index = 1
 	pending_action = nil
 end
@@ -1152,6 +1169,41 @@ local request_skip = function(frame)
 	end
 end
 
+-- Drops P2 from the current song on the server, then goes back to one player.
+local request_drop_out = function(frame)
+	open_busy_modal(
+		THEME:GetString("ScreenQueueReady", "DroppingTitle"),
+		THEME:GetString("ScreenQueueReady", "DroppingDetail"),
+		"drop_out"
+	)
+	frame:playcommand("Refresh")
+
+	local request, error_detail = build_server_request(
+		DROP_ENDPOINT,
+		"POST",
+		BuildStepManiaServerSongRequestBody({}),
+		function(response)
+			local body = safe_json_decode(response and response.body or "")
+
+			if not response or response.statusCode ~= 200 then
+				action_error_to_screen(frame, get_response_error_detail(response, body))
+				return
+			end
+
+			leave_side_two()
+			apply_selected_chart()
+			update_highscores_for_selected_difficulty()
+			close_modal()
+			schedule_queue_poll()
+			frame:playcommand("Refresh")
+		end
+	)
+
+	if not request then
+		action_error_to_screen(frame, error_detail)
+	end
+end
+
 local request_song_options = function()
 	SL.Global.ScreenAfter.PlayerOptions = "ScreenQueueReady"
 	close_modal()
@@ -1193,20 +1245,21 @@ input = function(event)
 		end
 
 		if is_start_button(event) then
-			if modal_index == 1 then
+			local action = modal_actions[modal_index]
+			if action == "continue" then
 				close_modal()
 				top_screen:GetChild("Underlay"):playcommand("Refresh")
-			elseif modal_index == 2 then
+			elseif action == "song_options" then
 				request_song_options()
-			else
-				if modal_index == 3 then
-					request_skip(top_screen:GetChild("Underlay"))
-				else
-					SL.Global.ServerModeActive = false
-					clear_server_session_state()
-					close_modal()
-					transition_to("ScreenTitleMenu")
-				end
+			elseif action == "skip" then
+				request_skip(top_screen:GetChild("Underlay"))
+			elseif action == "drop_out" then
+				request_drop_out(top_screen:GetChild("Underlay"))
+			elseif action == "exit" then
+				SL.Global.ServerModeActive = false
+				clear_server_session_state()
+				close_modal()
+				transition_to("ScreenTitleMenu")
 			end
 			return true
 		end
@@ -1265,7 +1318,7 @@ input = function(event)
 	end
 
 	if is_back_button(event) then
-		open_back_menu()
+		open_back_menu(event.PlayerNumber)
 		top_screen:GetChild("Underlay"):playcommand("Refresh")
 		local snd = top_screen:GetChild("Underlay"):GetChild("change_sound")
 		if snd then snd:play() end
