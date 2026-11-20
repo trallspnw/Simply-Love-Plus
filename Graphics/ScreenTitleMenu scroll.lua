@@ -1,4 +1,5 @@
 local index = Var("GameCommand"):GetIndex()
+local choice_text = Var("GameCommand"):GetText()
 local has_focus = false
 
 local t = Def.ActorFrame{}
@@ -6,17 +7,19 @@ local t = Def.ActorFrame{}
 -- this renders the text of a single choice in the scroller
 t[#t+1] = LoadFont("Common Bold")..{
 	Name="Choice"..index,
-	Text=THEME:GetString( 'ScreenTitleMenu', Var("GameCommand"):GetText() ),
+	Text=THEME:GetString( 'ScreenTitleMenu', choice_text ),
 
 	InitCommand=function(self) self:shadowlength(0.5) end,
 	OnCommand=function(self) self:diffusealpha(0):sleep(index*0.075):linear(0.2):diffusealpha(1) end,
 	OffCommand=function(self)
-		-- if the first TitleMenu choice (Gameplay) was chosen by the player
-		-- broadcast using MESSAGEMAN
-		if index==0 and has_focus then
-			-- actors can hook into this like
-			-- TitleMenuToGameplayMessageCommand=function(self) end
+		-- when the chosen TitleMenu choice starts a game, broadcast using MESSAGEMAN
+		-- actors can hook into these like
+		-- TitleMenuToGameplayMessageCommand=function(self) end
+		if has_focus and (choice_text == "Server Mode" or choice_text == "Dance Mode") then
 			MESSAGEMAN:Broadcast("TitleMenuToGameplay")
+		end
+		if has_focus and choice_text == "Server Mode" then
+			MESSAGEMAN:Broadcast("TitleMenuToServerMode")
 		end
 
 		self:sleep(index*0.075):linear(0.18):diffusealpha(0)

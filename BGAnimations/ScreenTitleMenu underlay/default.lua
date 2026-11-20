@@ -14,6 +14,24 @@ end
 local af = Def.ActorFrame{}
 af.InitCommand=function(self) self:Center() end
 
+-- Server Mode skips the style and play mode screens: P1 plays single and
+-- StepMania Server joins P2 on the ready screen. This sets up what those
+-- screens would have, before ScreenProfileLoad applies P1's modifiers.
+af.TitleMenuToServerModeMessageCommand=function(self)
+	if GAMESTATE:IsHumanPlayer(PLAYER_2) then
+		GAMESTATE:UnjoinPlayer(PLAYER_2)
+	end
+	if not GAMESTATE:IsHumanPlayer(PLAYER_1) then
+		GAMESTATE:JoinPlayer(PLAYER_1)
+	end
+	GAMESTATE:SetCurrentStyle("single")
+
+	SL.Global.GameMode = "Server"
+	SetGameModePreferences()
+	-- metrics such as ScreenProfileLoad's NextScreen branch on the GameMode
+	THEME:ReloadMetrics()
+end
+
 
 -- IsSpooky() will be true during October if EasterEggs are enabled
 -- this is the content found in ./Graphics/_VisualStyles/Spooky/ExtraSpooky
