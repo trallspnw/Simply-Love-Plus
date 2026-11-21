@@ -928,10 +928,20 @@ local join_side_two = function(player)
 		selected_index = find_initial_chart_index(options, player, player.user_highscore, player.server_highscore),
 	}
 
-	if not GAMESTATE:IsHumanPlayer(PLAYER_2) then
+	local is_fresh_join = not GAMESTATE:IsHumanPlayer(PLAYER_2)
+	if is_fresh_join then
 		GAMESTATE:JoinPlayer(PLAYER_2)
 	end
 	GAMESTATE:SetCurrentStyle("versus")
+
+	-- A fresh join starts from the theme's default modifiers, as a late join on
+	-- ScreenSelectMusic does; without ApplyMods the engine plays P2 at 1x.
+	if is_fresh_join then
+		if not PROFILEMAN:IsPersistentProfile(PLAYER_2) then
+			LoadGuest(PLAYER_2)
+		end
+		ApplyMods(PLAYER_2)
+	end
 end
 
 -- Matches the cabinet's P2 to the server's side 2: joins P2 when someone joined
